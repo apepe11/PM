@@ -8,11 +8,18 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 
+from dotenv import load_dotenv   # <-- nuovo import
+
+# Carica le variabili dal file .env
+load_dotenv()
+
 # Configurazione Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# INSERISCI LA TUA API KEY DI GEMINI
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6KDCgIhFvS-6pw5UdsdqzXCKPuJK7INgERffn79e9S26w")
+# Leggi la chiave API da variabile d'ambiente (obbligatoria)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY non impostata. Creare un file .env con GEMINI_API_KEY=...")
 
 # Carica google.generativeai dinamicamente per evitare problemi di tipizzazione pyright/pylance
 _genai_module = importlib.import_module("google.generativeai")
