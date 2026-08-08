@@ -1,0 +1,20 @@
+# Ambienti virtuali
+venv/
+.venv/
+env/
+.env/
+
+# File di cache compilati di Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Variabili d'ambiente (file con chiavi API e segreti)
+.env
+
+# Database locali SQLite (come il tuo petruzzi_ordini.db)
+*.db
+*.sqlite3
+
+# Cartella della sessione di WhatsApp (per evitare di caricare token e IndexedDB)
+whatsapp_session/

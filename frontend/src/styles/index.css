@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #FAF6F0;
+    background-image: radial-gradient(circle at 50% 0%, #FFFDF9 0%, #FAF6F0 60%, #F3EBDD 100%);
+    color: #3D2017;
+    @apply font-sans tracking-normal selection:bg-amber-200 selection:text-amber-950 min-h-screen;
+  }
+}
+
+/* Custom Scrollbar in Warm Beige / Logo Brown */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: #F3EBDD;
+}
+::-webkit-scrollbar-thumb {
+  background: #A37145;
+  border-radius: 9999px;
+  border: 2px solid #F3EBDD;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #7D5236;
+}
+
+/* Petruzzi Warm Beige & Logo Brown Premium Card */
+.petruzzi-card {
+  background: rgba(255, 253, 249, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(125, 82, 54, 0.18);
+  box-shadow: 0 10px 30px -8px rgba(78, 42, 30, 0.07), 0 2px 8px 0 rgba(163, 113, 69, 0.04);
+}
+
+.petruzzi-card-hover {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.petruzzi-card-hover:hover {
+  border-color: rgba(125, 82, 54, 0.4);
+  transform: translateY(-3px);
+  box-shadow: 0 16px 35px -8px rgba(78, 42, 30, 0.12), 0 4px 12px 0 rgba(163, 113, 69, 0.08);
+}
+
+/* Header Glow Bar */
+.petruzzi-header-glow {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FAF5EE 100%);
+  border-bottom: 2px solid rgba(125, 82, 54, 0.25);
+  box-shadow: 0 4px 20px -5px rgba(78, 42, 30, 0.08);
+}
+
+/* Laboratory Print Optimization */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-container {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  table.print-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  table.print-table th, table.print-table td {
+    border: 2px solid #000000 !important;
+    padding: 10px !important;
+    font-size: 14pt !important;
+    color: #000000 !important;
+  }
+  table.print-table th {
+    background-color: #f5f5f5 !important;
+  }
+}

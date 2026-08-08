@@ -1,0 +1,169 @@
+{
+  "clienti": [
+    {
+      "nome_cliente": "Mario Rossi",
+      "telefono": "",
+      "ricotta_default": "RIC300",
+      "mozzarella_default": "FIORDPE",
+      "particolarita": "Quando ordina 'ricotta' a pezzi intende sempre le vaschette Ricotta 300g (codice RIC300)."
+    },
+    {
+      "nome_cliente": "Ristorante Plaza",
+      "telefono": "",
+      "ricotta_default": "RICOTPE",
+      "mozzarella_default": "FIORDPE",
+      "particolarita": "Prende sempre fior di latte da 250g. Consegna preferibile entro le 10:00 del mattino.",
+      "storico_ordini_esempi": [
+        {
+          "messaggio_raw": "5 vaschette fior di latte e 2 ricotte fresche",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FIORDPE",
+              "quantita": 5.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 2.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Giuseppe",
+      "telefono": "",
+      "ricotta_default": "RIC",
+      "mozzarella_default": "FIOR DE LAT",
+      "particolarita": "Ordina solitamente prodotti Senza Lattosio (Delat)."
+    },
+    {
+      "nome_cliente": "Pizzeria Plaza",
+      "telefono": "080998877",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Ordina solo fior di latte alla julienne 3kg per la pizza."
+    },
+    {
+      "nome_cliente": "Sole 365",
+      "telefono": "",
+      "stracciatella_default": "STRACPE",
+      "particolarita": "I clienti del gruppo Sole 365 effettuano un raggruppamento di ordine separato. Quando richiedono 'stracciatella', intendono SEMPRE la Stracciatella Petruzzi (codice STRACPE) e NON la stracciatella da 250g (codice STRA20250PE)."
+    },
+    {
+      "nome_cliente": "Andrea Aliandro",
+      "telefono": "",
+      "particolarita": "Titolare del Caseificio Petruzzi. Gli ordini inviati da Andrea Aliandro hanno priorità alta ed appartengono alla produzione interna."
+    },
+    {
+      "nome_cliente": "Salvatore Sole365 Italia",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08.",
+      "ultimo_ordine": "2026-08-08 16:03:19",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 15:55:56",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera per lunedi 4 kg stracciatella 3 kg vaschette da 500gr tritato 1 kg vaschette vaschette da 250gr tritato 1 coppia di",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "STRACPE",
+              "quantita": 4.0,
+              "unita_di_misura": "kg",
+              "nome_articolo": "Stracciatella Petruzzi (Sfusa 1kg)"
+            },
+            {
+              "codice_articolo": "TAGJU3000PE",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "TAGJU0250PE",
+              "quantita": 1.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "CACBIPE",
+              "quantita": 2.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 12.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Antonio Pepe",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Richiesto canestrato (mappato a Caciocavallo Petruzzi)",
+      "ultimo_ordine": "2026-08-08 16:03:23",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 15:55:59",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"mezzo kg di ricotta, 3 kg di bocconcini , 2 canestrato\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 0.5,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "BOC0250PE",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "CACBIPE",
+              "quantita": 2.0,
+              "unita_di_misura": "kg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Carmela Sico",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Ordine annullato dal cliente via WhatsApp.",
+      "ultimo_ordine": "2026-08-08 16:04:19",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 16:04:19",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Da cambiare non ho niente scusami\"",
+          "traduzione_ia": []
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Marotta",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Richiesta fatturazione nel prossimo ordine come da accordi.",
+      "ultimo_ordine": "2026-08-08 16:33:10",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 16:33:10",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Tony buongiorno ho dimenticato di ordinare le vaschette 500 se per favore quando passate me le lasci e se puoi le fatturi la ",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FDLBI0500PE",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
