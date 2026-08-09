@@ -4,8 +4,9 @@ import json
 import time
 import logging
 import asyncio
+import base64
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple, Union, Any
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -20,59 +21,45 @@ if not GROQ_API_KEY:
 
 client_groq = Groq(api_key=GROQ_API_KEY)
 GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_AUDIO_MODEL = "whisper-large-v3"
 
 GROQ_LOCK = asyncio.Lock()
 LAST_GROQ_REQUEST_TIME = 0.0
 
-def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None) -> tuple[datetime, str]:
+def calcola_data_consegna_target(data_attiva_str: str, client_name: str = "") -> Tuple[str, str]:
     """
-    Calcola la data di consegna target gestendo la chiusura domenicale e la deadline delle 08:00.
+    Calcola la data di consegna target basandosi sulla Data Attiva impostata dal pulsante,
+    gestendo i casi speciali (es. Andrea Aliandro).
+    Ritorna SEMPRE una stringa (es. 'YYYY-MM-DD') e una stringa descrittiva.
     """
-    if ora_attuale is None:
-        ora_attuale = datetime.now()
+    if not data_attiva_str:
+        data_attiva_str = datetime.now().strftime('%Y-%m-%d')
+        
+    data_attiva_dt = datetime.strptime(data_attiva_str, '%Y-%m-%d')
+    is_andrea = "andrea aliandro" in (client_name or "").lower()
 
-    h = ora_attuale.hour
-    wd = ora_attuale.weekday() # 0=Lunedì, ..., 5=Sabato, 6=Domenica
-
-    # --- REGOLE WEEKEND: Da Sabato 08:00 a Lunedì 07:59 -> Consegna Lunedì ---
-    if (wd == 5 and h >= 8) or (wd == 6) or (wd == 0 and h < 8):
-        if wd == 5:   # Sabato
-            days_add = 2
-        elif wd == 6: # Domenica
-            days_add = 1
-        else:         # Lunedì
-            days_add = 0
+    # --- REGOLE SPECIALI PER ANDREA ALIANDRO ---
+    if is_andrea:
+        data_target = data_attiva_dt + timedelta(days=1)
+        
+        # Se cade di domenica, passa automaticamente a lunedì
+        if data_target.weekday() == 6:
+            data_target += timedelta(days=1)
             
-        data_target = ora_attuale + timedelta(days=days_add)
         desc = (
-            f"📅 REGOLE TEMPORALI WEEKEND (NO DOMENICA):\n"
-            f"Il messaggio è stato inviato in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
-            f"Essendo arrivato nel periodo tra Sabato alle 08:00 e Lunedì alle 08:00, la consegna SLITTA TASSATIVAMENTE A LUNEDÌ.\n"
+            f"📅 REGOLE TEMPORALI SPECIALI PER ANDREA ALIANDRO:\n"
+            f"Gli ordini inoltrati da Andrea sono SEMPRE di default per il GIORNO SUCCESSIVO rispetto alla produzione in corso.\n"
             f"Data di consegna di default: \"{data_target.strftime('%Y-%m-%d')}\"."
         )
-    # --- REGOLE INFRASETTIMANALI ---
-    else:
-        if h < 8:
-            data_target = ora_attuale
-            desc = (
-                f"📅 REGOLE TEMPORALI (< 08:00):\n"
-                f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
-                f"Essendo arrivato prima delle 08:00, la data di consegna di default (se il cliente dice 'oggi') è lo stesso giorno: \"{data_target.strftime('%Y-%m-%d')}\"."
-            )
-        else:
-            data_target = ora_attuale + timedelta(days=1)
-            # Controllo extra: se infrasettimanale ma cade di domenica, passa a lunedì (es. Venerdì dopo le 8 + dopodomani)
-            if data_target.weekday() == 6:
-                data_target += timedelta(days=1)
-                
-            desc = (
-                f"📅 REGOLE TEMPORALI (>= 08:00):\n"
-                f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
-                f"Avendo superato le 08:00, l'ordine SLITTA AUTOMATICAMENTE al giorno lavorativo successivo.\n"
-                f"Data di consegna di default (se il cliente dice 'per domani'): \"{data_target.strftime('%Y-%m-%d')}\"."
-            )
+        return data_target.strftime('%Y-%m-%d'), desc
 
-    return data_target, desc
+    # --- REGOLA STANDARD BASATA SUL PULSANTE "DATA ATTIVA" ---
+    desc = (
+        f"📅 REGOLE TEMPORALI ATTUALI:\n"
+        f"La data di ricezione in corso (selezionata dal gestionale) è {data_attiva_str}.\n"
+        f"Se il cliente NON specifica esplicitamente un giorno diverso, usa TASSATIVAMENTE questa data di default: \"{data_attiva_str}\"."
+    )
+    return data_attiva_str, desc
 
 class AIParser:
     def __init__(self, base_dir="catalogo"):
@@ -88,7 +75,7 @@ class AIParser:
                 
         self.client_rules = self._load_json(os.path.join(base_dir, "particolarita_clienti.json"), {"clienti": []})
 
-    def _load_json(self, file_path, default_value):
+    def _load_json(self, file_path: str, default_value: Any) -> Any:
         if os.path.exists(file_path):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -152,7 +139,6 @@ class AIParser:
                 if mozz_def: rule_text += f"- Se ordina mozzarella senza specificare, intende: {mozz_def}\n"
                 
                 if storico:
-                    # Limitiamo i token anche qui prendendo solo l'ultimo storico
                     es = storico[0] if len(storico) > 0 else None
                     if es:
                         rule_text += "- ESEMPIO STORICO (TRADUCI ESATTAMENTE COSÌ I SUOI ORDINI):\n"
@@ -162,8 +148,8 @@ class AIParser:
                 return rule_text
         return ""
 
-    def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = "", message_timestamp: Optional[datetime] = None):
-        # 1. COMPRESSIONE ESTREMA DEL CATALOGO: Solo i campi strettamente necessari
+    def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = "", data_attiva_str: str = ""):
+        # COMPRESSIONE ESTREMA DEL CATALOGO
         catalogo_compresso = []
         for p in self.catalog:
             catalogo_compresso.append({
@@ -172,15 +158,19 @@ class AIParser:
                 "um": p.get("unita_misura", p.get("unita_di_misura", "kg")).lower()
             })
         
-        # 2. RIMOZIONE SPAZI BIANCHI: Riduciamo drasticamente i token JSON
         catalog_formatted = json.dumps(catalogo_compresso, separators=(',', ':'), ensure_ascii=False)
-        
         regole_cliente = self.get_specific_client_rules(client_name)
-
         campioni_block = f"\nSTORICO CAMPIONI CONFERMATI '{client_name}':\n{campioni_passati_str}\n" if campioni_passati_str else ""
 
-        data_target, descrizione_slot = calcola_data_consegna_target(message_timestamp)
-        data_default_str = data_target.strftime('%Y-%m-%d')
+        data_target_str, descrizione_slot = calcola_data_consegna_target(data_attiva_str, client_name)
+
+        andrea_rule = ""
+        if "andrea aliandro" in (client_name or "").lower():
+            andrea_rule = (
+                "5. CASO SPECIALE ANDREA ALIANDRO: Andrea sta inoltrando un ordine per un altro cliente. "
+                "Il nome del cliente REALE è sempre scritto all'inizio del messaggio prima della virgola o dell'ordine. "
+                "ESTRAI il nome del cliente finale e valorizza il campo 'cliente_reale' nel JSON."
+            )
 
         return f"""Sei l'assistente IA del Caseificio Petruzzi. 
             Il tuo compito è analizzare la conversazione WhatsApp ed estrarre l'ordine FINALE CONSOLIDATO.
@@ -191,9 +181,10 @@ class AIParser:
             2. AGGIUNTE / INTEGRAZIONI: Somma i nuovi prodotti a quelli richiesti in precedenza.
             3. CORREZIONI / SOSTITUZIONI: Applica le modifiche richieste nel risultato finale.
             4. ANNULLAMENTO DELL'ORDINE: Se richiesto, imposta "is_cancelled": true e svuota l'array dei prodotti.
+            {andrea_rule}
 
             REGOLE TASSATIVE DATA DI CONSEGNA:
-            1. SE NON SPECIFICATO -> CONSEGNA TASSATIVA: "{data_default_str}".
+            1. SE NON SPECIFICATO -> CONSEGNA TASSATIVA: "{data_target_str}".
             {descrizione_slot}
 
             CATALOGO PRODOTTI UFFICIALE:
@@ -209,10 +200,11 @@ class AIParser:
 
             SCHEMA JSON RICHIESTO:
             {{
-            "testo_trascritto": "trascrizione in italiano",
+            "testo_trascritto": "trascrizione in italiano (importante: riempi questo campo se hai trascritto un vocale)",
             "is_order": true,
             "is_cancelled": false,
             "data_consegna": "YYYY-MM-DD",
+            "cliente_reale": "Nome Estratto (solo se mittente è Andrea Aliandro, altrimenti null)",
             "prodotti": [
                 {{
                 "codice_articolo": "STRINGA",
@@ -226,6 +218,29 @@ class AIParser:
 
     async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg", message_timestamp: Optional[datetime] = None):
         global LAST_GROQ_REQUEST_TIME
+        
+        testo_trascritto_vocale = ""
+
+        # --- TRASCRIZIONE AUDIO GROQ WHISPER ---
+        if audio_data:
+            try:
+                logging.info(f"🎙️ Avvio trascrizione Groq Whisper per {client_name}...")
+                audio_bytes = base64.b64decode(audio_data)
+                
+                # Chiamata al modello audio Whisper di Groq
+                transcription = client_groq.audio.transcriptions.create(
+                  file=("audio.ogg", audio_bytes),
+                  model=GROQ_AUDIO_MODEL,
+                  response_format="json"
+                )
+                
+                testo_trascritto_vocale = transcription.text
+                logging.info(f"🎙️ Trascrizione completata: {testo_trascritto_vocale}")
+                
+                # Uniamo la trascrizione al testo originale da analizzare
+                text_to_parse = f"{text_to_parse}\n[TRASCRIZIONE VOCALE]: {testo_trascritto_vocale}"
+            except Exception as e:
+                logging.error(f"❌ Errore trascrizione audio Groq Whisper: {e}")
 
         if not audio_data and self.is_courtesy_or_non_order(text_to_parse):
             return {
@@ -236,11 +251,18 @@ class AIParser:
                 "da_verificare_manualmente": False
             }
 
-        from backend.db import get_campioni_ia_cliente
+        # Recuperiamo dinamicamente la data attiva per passarla al prompt
+        try:
+            from backend.db import get_campioni_ia_cliente, get_data_attiva
+            data_attiva_str = await get_data_attiva()
+        except ImportError:
+            data_attiva_str = datetime.now().strftime('%Y-%m-%d')
+            async def get_campioni_ia_cliente_dummy(x): return []
+            get_campioni_ia_cliente = get_campioni_ia_cliente_dummy
+
         campioni = await get_campioni_ia_cliente(client_name)
         campioni_str = ""
         if campioni:
-            # 3. LIMITAZIONE CAMPIONI: Riduciamo i token prendendo solo gli ultimi 2 esempi storici
             campioni = campioni[:2]
             campioni_str = "\n".join([f"- In:\"{c.get('testo_originale', '')}\"->Out:{json.dumps(c.get('dati_confermati', {}), separators=(',', ':'), ensure_ascii=False)}" for c in campioni])
 
@@ -255,7 +277,7 @@ class AIParser:
                 LAST_GROQ_REQUEST_TIME = time.time()
 
             try:
-                prompt_sistema = self.build_system_instruction(client_name, campioni_str, message_timestamp)
+                prompt_sistema = self.build_system_instruction(client_name, campioni_str, data_attiva_str)
                 
                 if storico_oggi:
                     prompt_utente = f"STORICO CONVERSAZIONE DI OGGI CON {client_name}:\n{storico_oggi}\n\nNUOVO MESSAGGIO DI CORREZIONE/AGGIUNTA:\n\"{text_to_parse}\""
@@ -279,9 +301,21 @@ class AIParser:
                     raw_text = raw_text.strip()
 
                 parsed_json = json.loads(raw_text)
-                parsed_json["cliente_id"] = client_name
+                
+                # Se avevamo trascritto un vocale, assicuriamoci che l'IA non l'abbia perso
+                if testo_trascritto_vocale and not parsed_json.get("testo_trascritto"):
+                    parsed_json["testo_trascritto"] = testo_trascritto_vocale
+                
+                # --- GESTIONE NOME CLIENTE REALE (VIA ANDREA ALIANDRO) ---
+                cliente_finale = client_name
+                if "andrea aliandro" in (client_name or "").lower():
+                    estratto = str(parsed_json.get("cliente_reale", "")).strip()
+                    if estratto and estratto.lower() not in ["null", "none", "andrea aliandro"]:
+                        cliente_finale = f"{estratto} (via Andrea)"
+                
+                parsed_json["cliente_id"] = cliente_finale
 
-                is_sole_365 = "sole 365" in client_name.lower() or "sole365" in client_name.lower()
+                is_sole_365 = "sole 365" in cliente_finale.lower() or "sole365" in cliente_finale.lower()
                 prodotti_parsed = parsed_json.get("prodotti", [])
                 for p in prodotti_parsed:
                     cod = p.get("codice_articolo", "")
@@ -313,11 +347,11 @@ class AIParser:
                     continue
 
                 logging.error(f"❌ Errore definitivo Groq IA: {e}. Attivazione Parser Locale di riserva.")
-                return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
+                return self.fallback_local_parse(text_to_parse, client_name, message_timestamp, data_attiva_str)
 
-        return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
+        return self.fallback_local_parse(text_to_parse, client_name, message_timestamp, data_attiva_str)
 
-    def fallback_local_parse(self, text_to_parse: str, client_name: str, message_timestamp: Optional[datetime] = None) -> dict:
+    def fallback_local_parse(self, text_to_parse: str, client_name: str, message_timestamp: Optional[datetime] = None, data_attiva_str: str = "") -> dict:
         testo_pulito_cifre = re.sub(r'[\s\-\.\(\)\+:]', '', text_to_parse or "")
         if testo_pulito_cifre.isdigit() and len(testo_pulito_cifre) >= 6:
             return {
@@ -367,25 +401,21 @@ class AIParser:
                     "unita_di_misura": matched_entry["um"]
                 })
 
-        # --- LOGICA DI RICONOSCIMENTO TEMPORALE NEL PARSER DI RISERVA ---
         base_dt = message_timestamp if message_timestamp else datetime.now()
         t_lower = (text_to_parse or "").lower()
         
-        # Sfruttiamo la nuova funzione con le regole del weekend (no domenica)
-        data_target, _ = calcola_data_consegna_target(message_timestamp)
+        data_target_str, _ = calcola_data_consegna_target(data_attiva_str, client_name)
+        data_target = datetime.strptime(data_target_str, '%Y-%m-%d')
         
         if "dopodomani" in t_lower:
             data_target = base_dt + timedelta(days=2)
-            # Salta la domenica
             if data_target.weekday() == 6: 
                 data_target += timedelta(days=1)
         elif "domani" in t_lower:
             data_target = base_dt + timedelta(days=1)
-            # Salta la domenica
             if data_target.weekday() == 6: 
                 data_target += timedelta(days=1)
         else:
-            # Riconoscimento giorni della settimana
             giorni_map = {
                 "lunedì": 0, "lunedi": 0,
                 "martedì": 1, "martedi": 1,
@@ -407,16 +437,24 @@ class AIParser:
                 if days_ahead <= 0:
                     days_ahead += 7
                 data_target = base_dt + timedelta(days=days_ahead)
-                # Anche qui, se per caso forza 'domenica', lo spostiamo in automatico a lunedì
                 if data_target.weekday() == 6:
                     data_target += timedelta(days=1)
 
         is_canc = bool(re.search(r'\b(?:annulla|cancella|disdici|elimina|non portarmi|non mi serve)\b', t_lower, re.IGNORECASE))
 
+        # --- GESTIONE NOME CLIENTE REALE (PARSER LOCALE) ---
+        cliente_finale = client_name
+        if "andrea aliandro" in (client_name or "").lower():
+            match_nome = re.match(r'^([^,:\n]+)[,:\n]', text_to_parse or "")
+            if match_nome:
+                estratto = match_nome.group(1).strip()
+                if estratto:
+                    cliente_finale = f"{estratto} (via Andrea)"
+
         return {
             "is_order": not is_canc and len(prodotti_trovati) > 0,
             "is_cancelled": is_canc,
-            "cliente_id": client_name,
+            "cliente_id": cliente_finale,
             "data_consegna": data_target.strftime('%Y-%m-%d'),
             "prodotti": [] if is_canc else prodotti_trovati,
             "note_ordine": "[Annullato dal cliente via WhatsApp]" if is_canc else f"[Parser Locale di Riserva] {text_to_parse}",

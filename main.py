@@ -1,7 +1,7 @@
 import asyncio
 import os
 import json
-from datetime import datetime  # <-- IMPORTANTE: aggiunto per risolvere l'errore "datetime is not defined"
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +32,8 @@ from backend.db import (
     elimina_broadcast_log,
     rielabora_tutti_ordini,
     svuota_database_ordini,
+    get_data_attiva,         # <--- NUOVO IMPORT
+    avanza_data_attiva,      # <--- NUOVO IMPORT
     DB_FILE
 )
 
@@ -54,10 +56,6 @@ from backend.whatsapp import (
 
 app = FastAPI(title="Petruzzi Manager - Dashboard API")
 
-# Abilita CORS per collegare il frontend alla dashboard
-# 🩹 FIX: allow_origins=["*"] insieme ad allow_credentials=True non è valido
-# per la spec CORS: i browser rifiutano le risposte con credenziali quando
-# l'origine è wildcard. Con credentials=True servono origini esplicite.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -93,8 +91,24 @@ def status():
     return {
         "status": "Motore Petruzzi Attivo",
         "database": "SQLite Locale",
-        "ai": "Gemini API (gemini-flash-lite-latest)"
+        "ai": "Groq API (Llama 3.3)"
     }
+
+# -----------------------------------------------------
+# ROTTE DELLA DATA ATTIVA DI PRODUZIONE
+# -----------------------------------------------------
+@app.get("/api/data-attiva")
+async def api_get_data_attiva():
+    """Restituisce la data di produzione in corso."""
+    data = await get_data_attiva()
+    return {"data_attiva": data}
+
+@app.post("/api/chiudi-produzione")
+async def api_chiudi_produzione():
+    """Scatta in avanti di un giorno (saltando la domenica) la data di ricezione."""
+    nuova_data = await avanza_data_attiva()
+    return {"status": "success", "nuova_data": nuova_data, "message": f"Ricezione ordini chiusa. Nuova data: {nuova_data}"}
+
 
 # -----------------------------------------------------
 # Rotte Connessione Banco WhatsApp (Evolution API)
@@ -141,7 +155,8 @@ async def svuota_database_endpoint():
     return {"status": "success", "message": "Database ordini svuotato con successo."}
 
 @app.get("/api/ordini")
-async def list_ordini(data: Optional[str] = Query(None), scomponi_pezzi: bool = Query(False)): # <-- bool corretto
+async def list_ordini(data: Optional[str] = Query(None), scomponi_pezzi: bool = Query(False)):
+    # Adesso gestisce la logica di fallback sulla Data Attiva in autonomia
     return await get_tutti_ordini(data, scomponi_pezzi=scomponi_pezzi)
 
 @app.post("/api/ordini/rielabora-tutti")
@@ -212,7 +227,7 @@ async def add_ordine(payload: OrdineCreate):
     ordine_id = await crea_ordine_manuale(
         mittente=payload.mittente,
         prodotti=prodotti_dict,
-        note=payload.note_ordine or "", # <-- stringa sicura
+        note=payload.note_ordine or "",
         data_consegna=payload.data_consegna
     )
     return {"status": "ok", "id": ordine_id}
@@ -223,7 +238,7 @@ async def update_ordine(id_ordine: int, payload: OrdineUpdate):
     success = await aggiorna_ordine(
         id_ordine=id_ordine,
         prodotti=prodotti_dict,
-        note=payload.note_ordine or "", # <-- stringa sicura
+        note=payload.note_ordine or "", 
         data_consegna=payload.data_consegna
     )
     if not success:
@@ -242,7 +257,7 @@ async def list_produzione(data: Optional[str] = Query(None)):
     return await get_produzione_aggregata(data)
 
 @app.get("/api/statistiche")
-async def get_stats(periodo_tipo: str = Query("mensile"), periodo_valore: Optional[str] = Query(None)): # <-- str corretto
+async def get_stats(periodo_tipo: str = Query("mensile"), periodo_valore: Optional[str] = Query(None)):
     return await get_statistiche(periodo_tipo, periodo_valore)
 
 @app.get("/api/prodotti")
@@ -254,7 +269,6 @@ async def list_prodotti():
     return []
 
 def salva_e_apri_pdf_temp(pdf_bytes: bytes, filename: str):
-    """Salva il PDF generato in cartella reports/ ed esegue l'apertura nativa 1-click sull'OS."""
     try:
         reports_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "reports"))
         os.makedirs(reports_dir, exist_ok=True)
@@ -267,7 +281,7 @@ def salva_e_apri_pdf_temp(pdf_bytes: bytes, filename: str):
 
 @app.get("/api/pdf/produzione")
 async def download_pdf_produzione(data: Optional[str] = Query(None)):
-    target_data = data or datetime.now().strftime('%Y-%m-%d') # <-- stringa sicura
+    target_data = data or await get_data_attiva()
     lista_prod = await get_produzione_aggregata(target_data)
     pdf_bytes = genera_pdf_produzione_totale(target_data, lista_prod)
     salva_e_apri_pdf_temp(pdf_bytes, f"produzione_petruzzi_{target_data}.pdf")
@@ -294,9 +308,8 @@ async def download_pdf_ordine(id_ordine: int):
 
 @app.get("/api/pdf/ordini-generale")
 async def download_pdf_ordini_generale(data: Optional[str] = Query(None)):
-    target_date = data or datetime.now().strftime('%Y-%m-%d')
+    target_date = data or await get_data_attiva()
     ordini = await get_tutti_ordini(target_date)
-    # Filtriamo via quelli annullati
     ordini_attivi = [o for o in ordini if not o.get('is_cancelled') and o.get('stato_ordine') != 'ANNULLATO']
     
     pdf_bytes = genera_pdf_ordini_generale(target_date, ordini_attivi)
@@ -314,7 +327,7 @@ async def list_filoni(data: Optional[str] = Query(None)):
 
 @app.get("/api/pdf/filoni")
 async def download_pdf_filoni(data: Optional[str] = Query(None)):
-    target_data = data or datetime.now().strftime('%Y-%m-%d') # <-- stringa sicura
+    target_data = data or await get_data_attiva()
     lista_filoni = await get_filoni_per_cliente(target_data)
     pdf_bytes = genera_pdf_filoni(target_data, lista_filoni)
     salva_e_apri_pdf_temp(pdf_bytes, f"filoni_pizzeria_{target_data}.pdf")
@@ -326,7 +339,7 @@ async def download_pdf_filoni(data: Optional[str] = Query(None)):
 
 @app.get("/api/pdf/ordini-confezionati-banco")
 async def download_pdf_ordini_confezionati_banco(data: Optional[str] = Query(None)):
-    target_data = data or datetime.now().strftime('%Y-%m-%d') # <-- stringa sicura
+    target_data = data or await get_data_attiva()
     ordini = await get_tutti_ordini(target_data)
     conf_list = [o for o in ordini if o.get('stato_confezionamento') == 'CONFEZIONATO' or o.get('stato_ordine') == 'CONFERMATO']
     pdf_bytes = genera_pdf_ordini_confezionati_banco(target_data, conf_list)
@@ -363,9 +376,6 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "petruzzi-secret-key")
 
 @app.get("/api/admin/backup-db")
 async def download_db_backup(token: Optional[str] = Query(None)):
-    # 🩹 NOTA SICUREZZA: token hardcoded nel sorgente = chiunque legga il
-    # codice (o lo scarichi via GitHub pubblico) può scaricare l'intero DB.
-    # Ora configurabile via variabile d'ambiente ADMIN_TOKEN.
     if token != ADMIN_TOKEN:
         raise HTTPException(status_code=403, detail="Token riservato non valido.")
     if not os.path.exists(DB_FILE):
@@ -382,7 +392,7 @@ async def get_admin_overview(token: Optional[str] = Query(None), data: Optional[
     if token != ADMIN_TOKEN:
         raise HTTPException(status_code=403, detail="Token riservato non valido.")
     
-    target_date = data or datetime.now().strftime('%Y-%m-%d')
+    target_date = data or await get_data_attiva()
     ordini_oggi = await get_tutti_ordini(target_date)
     prod_aggregata = await get_produzione_aggregata(target_date)
     
@@ -410,7 +420,6 @@ async def get_admin_overview(token: Optional[str] = Query(None), data: Optional[
         "timestamp_ultimo_aggiornamento": datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     }
 
-# Rotte SPA dedicate per Computer Principale, Tablet Confezionamento e Modulo Titolare
 @app.get("/tablet")
 @app.get("/tablet.html")
 async def serve_tablet_route():
@@ -438,7 +447,6 @@ images_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "images"))
 if os.path.exists(images_dir):
     app.mount("/images", StaticFiles(directory=images_dir), name="images")
 
-# Serve build frontend se presente
 frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend", "dist"))
 if os.path.exists(frontend_dist):
     app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

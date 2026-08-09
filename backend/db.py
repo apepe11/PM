@@ -10,8 +10,6 @@ DB_FILE = "petruzzi_ordini.db"
 
 
 def parse_dati_estratti_ia(dati_raw) -> dict:
-    """Parsing robusto e centralizzato di dati_estratti_ia, gestisce sia JSON valido
-    sia repr() di dict Python salvati per errore altrove nel sistema."""
     if not dati_raw:
         return {}
     if isinstance(dati_raw, dict):
@@ -27,16 +25,50 @@ def parse_dati_estratti_ia(dati_raw) -> dict:
             return {}
     return {}
 
+# --- NUOVA GESTIONE DATA ATTIVA (SOSTITUISCE L'OROLOGIO FISSO) ---
+async def get_data_attiva() -> str:
+    """Legge la Data di Produzione attualmente in corso dal DB."""
+    async with aiosqlite.connect(DB_FILE) as db:
+        cursor = await db.execute("SELECT valore FROM impostazioni WHERE chiave = 'data_attiva'")
+        row = await cursor.fetchone()
+        if row:
+            return row[0]
+        else:
+            # Inizializzazione la prima volta che si lancia il sistema
+            oggi = datetime.now()
+            if oggi.hour >= 8:
+                data_calc = oggi + timedelta(days=1)
+            else:
+                data_calc = oggi
+            
+            if data_calc.weekday() == 6: # Domenica -> Lunedì
+                data_calc += timedelta(days=1)
+            
+            data_str = data_calc.strftime('%Y-%m-%d')
+            await db.execute("INSERT INTO impostazioni (chiave, valore) VALUES ('data_attiva', ?)", (data_str,))
+            await db.commit()
+            return data_str
 
-def _calcola_data_consegna_target_pura(ora_attuale: datetime) -> datetime:
-    """Versione standalone (nessuna dipendenza da ai_parser) per evitare import ciclici pericolosi."""
-    if ora_attuale.hour < 8:
-        return ora_attuale
-    return ora_attuale + timedelta(days=1)
+async def avanza_data_attiva() -> str:
+    """Slitta la Data di Produzione in avanti di un giorno utile e la salva."""
+    corrente_str = await get_data_attiva()
+    corrente_dt = datetime.strptime(corrente_str, '%Y-%m-%d')
+    
+    nuova_dt = corrente_dt + timedelta(days=1)
+    if nuova_dt.weekday() == 6: # Salta la domenica
+        nuova_dt += timedelta(days=1)
+        
+    nuova_str = nuova_dt.strftime('%Y-%m-%d')
+    
+    async with aiosqlite.connect(DB_FILE) as db:
+        await db.execute("UPDATE impostazioni SET valore = ? WHERE chiave = 'data_attiva'", (nuova_str,))
+        await db.commit()
+        
+    return nuova_str
 
 
-def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = None) -> Optional[str]:
-    """Normalizza la data di consegna in formato ISO YYYY-MM-DD oppure la calcola dal timestamp di ricezione."""
+async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = None) -> Optional[str]:
+    """Normalizza la data e, se assente, assegna automaticamente la Data Attiva."""
     if data_consegna is not None:
         if isinstance(data_consegna, datetime):
             return data_consegna.strftime('%Y-%m-%d')
@@ -61,31 +93,12 @@ def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = 
                     pass
 
     if data_ricezione:
-        try:
-            dt_ric = datetime.strptime(data_ricezione, '%Y-%m-%d %H:%M:%S')
-        except Exception:
-            dt_ric = datetime.now()
-        return _calcola_data_consegna_target_pura(dt_ric).strftime('%Y-%m-%d')
+        return await get_data_attiva()
 
     return None
 
 
 async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_target: Optional[str], finestra_giorni: int = 7):
-    """
-    Cerca, tra gli ordini recenti del cliente (ultimi `finestra_giorni` giorni),
-    quello la cui data di consegna (calcolata/normalizzata) coincide con
-    `data_consegna_target`. Questo evita di accodare un nuovo messaggio a un
-    ordine esistente ma destinato a una consegna diversa (es. un ordine per
-    la settimana prossima ancora "aperto" quando arriva un messaggio nuovo
-    per la consegna di domani).
-
-    Se `data_consegna_target` è None (impossibile determinarlo), ricade sul
-    vecchio comportamento: il primo ordine ancora "aperto" (data_consegna
-    nulla o futura/odierna) più recente.
-
-    Ritorna la riga (id, testo_originale, dati_estratti_ia, data_ricezione)
-    oppure None se nessun ordine corrisponde.
-    """
     limite_ricezione = (datetime.now() - timedelta(days=finestra_giorni)).strftime('%Y-%m-%d %H:%M:%S')
     cursor = await db.execute(
         "SELECT id, testo_originale, dati_estratti_ia, data_ricezione FROM ordini "
@@ -98,7 +111,7 @@ async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_targ
     for row in rows:
         id_ord, testo_orig, dati_ia_raw, data_ric = row
         dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
-        data_consegna_ord = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
+        data_consegna_ord = await normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
 
         if data_consegna_target is not None:
             if data_consegna_ord == data_consegna_target:
@@ -164,10 +177,6 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
             "traduzione_ia": dati_ia.get("prodotti", [])
         }
 
-        # 🩹 FIX: dict.get(key, default) usa il default SOLO se la chiave manca,
-        # non se è presente con valore None. Se l'IA restituisce note_ordine: None
-        # questo sollevava AttributeError su .strip() (silenziato dal try/except
-        # esterno, ma con perdita dell'aggiornamento del profilo cliente).
         note_ext = (dati_ia.get("note_ordine") or "").strip()
 
         if found_client:
@@ -207,6 +216,12 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
 
 async def init_db():
     async with aiosqlite.connect(DB_FILE) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS impostazioni (
+                chiave TEXT PRIMARY KEY,
+                valore TEXT
+            )
+        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ordini (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -259,21 +274,19 @@ async def init_db():
             )
         """)
         await db.commit()
+        
+        # Forza la creazione della data attiva se non esiste
+        await get_data_attiva()
+        
         print("🗄️ Database Locale SQLite pronto.")
 
 async def get_storico_oggi(mittente: str) -> str:
-    # 🩹 FIX: prima si prendeva sempre l'ultimo ordine ricevuto (se ancora
-    # "aperto"), anche se destinato a una consegna futura scollegata
-    # (es. settimana prossima). Ora si cerca lo storico dell'ordine la cui
-    # data di consegna coincide con quella che avrebbe un messaggio
-    # arrivato adesso (il "default" calcolato da _calcola_data_consegna_target_pura),
-    # così l'IA riceve come contesto solo lo storico realmente pertinente.
-    target_data_consegna = _calcola_data_consegna_target_pura(datetime.now()).strftime('%Y-%m-%d')
+    target_data_consegna = await get_data_attiva()
     async with aiosqlite.connect(DB_FILE) as db:
         row = await _trova_ordine_esistente_per_data(db, mittente, target_data_consegna)
         if not row:
             return ""
-        return row[1]  # testo_originale
+        return row[1] 
 
 async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str] = None) -> bool:
     async with aiosqlite.connect(DB_FILE) as db:
@@ -291,24 +304,16 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
     async with aiosqlite.connect(DB_FILE) as db:
         now_str = data_ricezione_custom if data_ricezione_custom else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 🩹 FIX: risolvi/correggi la data di consegna del NUOVO messaggio
-        # PRIMA di decidere a quale ordine accodarlo. Prima si prendeva
-        # semplicemente l'ultimo ordine ricevuto dal cliente (se ancora
-        # "aperto" cioè data_consegna >= oggi): un ordine futuro per la
-        # settimana prossima veniva così "riaperto" e sporcato da un
-        # messaggio completamente nuovo destinato a domani.
         try:
             dati_json = json.loads(dati_estratti)
         except Exception:
             dati_json = {}
 
-        corrected_date = normalize_data_consegna(dati_json.get("data_consegna"), now_str)
+        corrected_date = await normalize_data_consegna(dati_json.get("data_consegna"), now_str)
         if corrected_date and dati_json.get("data_consegna") != corrected_date:
             dati_json["data_consegna"] = corrected_date
             dati_estratti = json.dumps(dati_json, ensure_ascii=False)
 
-        # Cerca un ordine esistente per lo STESSO cliente E la STESSA data di
-        # consegna del nuovo messaggio, invece che il semplice "ultimo ordine".
         row = await _trova_ordine_esistente_per_data(db, mittente, corrected_date)
 
         target_id = None
@@ -317,7 +322,6 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             target_id, storico_precedente = row[0], row[1]
 
         if target_id:
-            # 🛡️ SCUDO ANTI-LOOP TOTALE (BIDIREZIONALE)
             import re
             def normalize_str(s):
                 return re.sub(r'\W+', '', s).lower()
@@ -325,11 +329,9 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             norm_nuovo = normalize_str(nuovo_messaggio)
             norm_storico = normalize_str(storico_precedente)
 
-            # Se il nuovo messaggio è già dentro lo storico
             if norm_nuovo in norm_storico:
                 testo_combinato = storico_precedente
                 print("🚫 [ANTI-LOOP]: Messaggio ignorato perché già presente nello storico.")
-            # Se lo storico è già contenuto nel nuovo messaggio (il messaggio si sta espandendo)
             elif norm_storico in norm_nuovo:
                 testo_combinato = nuovo_messaggio
                 print("🚫 [ANTI-LOOP]: Il nuovo messaggio contiene già il vecchio, aggiorno senza duplicare.")
@@ -412,21 +414,16 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
         dati_raw = row[0]
         dati_parsed = parse_dati_estratti_ia(dati_raw)
 
-        # 1. Imposta il lotto generale (se lo hai scritto) oppure genera quello di default
         lotto_default = (numero_lotto or dati_parsed.get("numero_lotto") or f"L{datetime.now().strftime('%y%m%d')}").strip().upper()
-        
-        # 2. Usa i prodotti "sporcati" dalle tue modifiche nella Modale
         prodotti_attuali = prodotti if prodotti is not None else (dati_parsed.get("prodotti") or [])
             
         for p in prodotti_attuali:
             cod = p.get("codice_articolo", "")
             nome = p.get("nome_articolo", "") or cod
             
-            # Se un prodotto non ha un lotto specifico, usa quello generale in alto
             if not p.get("numero_lotto"):
                 p["numero_lotto"] = lotto_default
                 
-            # 3. Rispetta TASSATIVAMENTE la grammatura scritta a mano!
             unit_w = estrai_peso_unitario_da_nome(nome)
             if unit_w > 0:
                 p["is_peso_fisso"] = True
@@ -448,7 +445,6 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
         )
         await db.commit()
         
-        # Aggiornamento campioni IA (Funzione già esistente)
         try:
             cursor_m = await db.execute("SELECT mittente, testo_originale FROM ordini WHERE id = ?", (id_ordine,))
             row_m = await cursor_m.fetchone()
@@ -475,9 +471,9 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 dati_parsed = {"is_order": True, "prodotti": [], "note_ordine": str(dati_ia_raw)}
 
             data_consegna = dati_parsed.get("data_consegna")
-            data_consegna = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
+            data_consegna = await normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
             if not data_consegna:
-                data_consegna = normalize_data_consegna(None, data_ric)
+                data_consegna = await normalize_data_consegna(None, data_ric)
 
             if data_filtro and data_consegna != data_filtro:
                 continue
@@ -523,13 +519,13 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 "data_conferma": dati_parsed.get("data_conferma"),
                 "data_confezionamento": dati_parsed.get("data_confezionamento"),
                 "data_ricezione": data_ric,
-                "timestamp_elaborazione": dati_parsed.get("timestamp_elaborazione") # ECCO LA RIGA CHE MANCAVA!
+                "timestamp_elaborazione": dati_parsed.get("timestamp_elaborazione")
             })
         return ordini_lista
 
 async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
     if not data_consegna:
-        data_consegna = datetime.now().strftime('%Y-%m-%d')
+        data_consegna = await get_data_attiva()
     
     dati_ia = {
         "is_order": True,
@@ -635,11 +631,8 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
             nome = str(p.get("nome_articolo") or PRODOTTI_MAP.get(cod, {}).get("nome") or cod).strip()
             nome_lower = nome.lower()
             
-            # --- SCUDO ANTI-FILONI ---
-            # Se il codice o il nome contengono queste parole, salta il prodotto!
             if "filmzpe" in cod_lower or "filon" in nome_lower or "filon" in cod_lower or "panett" in nome_lower or "pizza" in nome_lower:
                 continue
-            # -------------------------
 
             qta = float(p.get("quantita", 0))
             um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()

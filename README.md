@@ -6,17 +6,18 @@ Piattaforma gestionale web ad alta velocità e motore di automazione event-drive
 
 ## 📸 Panoramica del Sistema
 
-Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di testo o **messaggio vocale**) ricevuti su WhatsApp Web, analizza le richieste tramite l'IA **Google Gemini**, consolida le quantità nel ciclo quotidiano del laboratorio (dalle **08:00** alle **08:00** del giorno successivo) e fornisce interfacce dedicate al **Casaro**, al **Reparto Confezionamento Tablet** ed all'**Amministratore / Titolare**.
+Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di testo o **messaggio vocale**) ricevuti su WhatsApp Web, analizza le richieste tramite l'IA **Groq**, consolida le quantità nel ciclo quotidiano del laboratorio (tramite pulsante manuale di chiusura ricezione ordini) e fornisce interfacce dedicate al **Casaro**, al **Reparto Confezionamento Tablet** ed all'**Amministratore / Titolare**.
 
 ---
 
 ## ✨ Funzionalità Implementate
 
-### 🎙️ 1. Trascrizione Automatica Immediata dei Vocali & Estrazione IA Gemini
+### 🎙️ 1. Trascrizione Automatica Immediata dei Vocali & Estrazione IA Groq
 - **Rilevamento Istrustantaneo Audio**: Intercettazione automatica dei messaggi vocali (audio blob, PTT, note vocali con durata) non appena arrivano su WhatsApp Web.
 - **Estrazione Audio & Autoplay Trigger**: Se il tag `<audio>` non ha ancora generato l'URL del `blob:`, il motore simula in automatico il click sul pulsante di riproduzione/download del vocale per forzare il caricamento immediato da parte di WhatsApp Web prima dell'estrazione base64.
-- **Trascrizione Parola per Parola & Estrazione Prodotti**: Il file audio viene inviato a `gemini-flash-lite-latest` che trascrive l'audio in italiano integrale (`testo_trascritto`) ed estrae contestualmente formaggi, pesi, quantita e note d'ordine.
-- **Badge Visivo Trascrizione**: In dashboard viene mostrato il testo integrale dell'audio nel badge dedicato `🎙️ Vocale Trascritto da Gemini`.
+- **Trascrizione Groq Whisper**: Il file audio viene inviato a `whisper-large-v3` di Groq, che lo trascrive in modo quasi istantaneo. La trascrizione viene poi unita al testo originale del messaggio.
+- **Trascrizione Parola per Parola & Estrazione Prodotti**: Il file audio viene inviato a `llama-3.3-70b-versatile` che trascrive l'audio in italiano integrale (`testo_trascritto`) ed estrae contestualmente formaggi, pesi, quantita e note d'ordine.
+- **Badge Visivo Trascrizione**: In dashboard viene mostrato il testo integrale dell'audio nel badge dedicato `🎙️ Vocale Trascritto da Groq`.
 
 ### ⚡ 2. Architettura di Scansione a 2 Livelli (Priorità Assoluta in Tempo Reale)
 - **LIVELLO 1 — PRIORITÀ ASSOLUTA (Nuovi Messaggi & Vocali in Arrivo)**:
@@ -29,15 +30,17 @@ Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di te
 - **Funzionamento Silenzioso 24/7 (Headless Mode)**: Il sistema è progettato per rimanere sempre aperto e operativo in sottofondo 24 ore su 24, analizzando in modo continuo gli ordini ed i vocali che arrivano a qualsiasi ora.
 - **Auto-Recovery & Riconnessione Automatica**: In caso di micro-cadute della rete Wi-Fi o disconnessioni di rete, il motore applica il retry automatico in 5 secondi, riavviando la sessione senza perdere l'autenticazione né richiedere una nuova scansione del QR code.
 - **Script di Avvio/Arresto Dedicati**:
-  - `./start_background.sh`: Avvia il servizio ed il motore WhatsApp in sottofondo continuo (headless, log salvato in `app.log`).
-  - `./stop_background.sh`: Arresta in modo pulito il servizio in background.
+  - `avvia_server.bat` e `start_invisibile.vbs`: Avvia il servizio ed il motore WhatsApp in sottofondo continuo (headless) su Windows.
+  - `crea_eseguibile.bat`: Compila automaticamente il progetto in un eseguibile `.exe` per Windows.
+  - `avvia_whatsapp.bat`: Gestisce l'installazione e l'avvio automatico di Docker Desktop e del container Evolution API.
 
 ### ⏱️ 4. Aggiornamento Real-Time Dashboard (3 Secondi)
-- Polling ad alta frequenza nel frontend React ([`frontend/src/App.jsx`](file:///home/antonio/Desktop/Petruzzi/frontend/src/App.jsx)) passato da 10s a **3s**, rendendo visibili all'istante le nuove trascrizioni vocali e gli ordini acquisiti.
+- Polling ad alta frequenza nel frontend React passato da 10s a **3s**, rendendo visibili all'istante le nuove trascrizioni vocali e gli ordini acquisiti.
 
 ### 🏭 5. Produzione Giornaliera Casaro & Stampa PDF 1-Pagina A4
 - **Aggregazione Automatica dei Totali**: Somma automatica dei formaggi da produrre per la giornata selezionata (es. tutti i kg di Treccia di Scamorza ordinati da clienti diversi).
-- **Finestra Oraria 08:00 $\rightarrow$ 08:00 (Deadline Rigida)**: Tutti gli ordini ricevuti tra le 08:00 del Giorno X e le 08:00 del Giorno X+1 vengono raggruppati tassativamente nella produzione del Giorno X+1.
+- **Chiusura Ricezione Ordini Manuale (Data Attiva)**: Lo slittamento della data di produzione avviene manualmente tramite il pulsante "Chiudi Ricezione Ordini" in dashboard, offrendo il massimo controllo rispetto agli orari flessibili di produzione. La "Data Attiva" viene salvata nel database e usata da tutto il sistema.
+- **Gestione Automatica Weekend**: Quando la produzione viene chiusa di sabato, la nuova data salta automaticamente la domenica, posizionandosi sul lunedì.
 - **Report PDF 1-Pagina A4 (Privacy-Compliant)**: Generazione 1-click del foglio di laboratorio A4 compatto, privo di numeri di telefono o dati sensibili dei clienti, ideale da tenere sul banco lavorazione.
 
 ### 🍕 6. Scheda Filoni Pizzeria per Cliente & PDF Dedicato
@@ -47,7 +50,9 @@ Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di te
 
 ### 📦 7. Ordini Clienti, Filtro Giornaliero & Selezione Clienti Registrati
 - **Filtro Data Ordini**: Possibilità di filtrare le schede ordini per data target di consegna (**Oggi**, **Domani**, **Data Personalizzata** o **Tutti gli Ordini**).
+- **Isolamento Storico per Data**: I nuovi messaggi vengono accodati agli ordini preesistenti *solo* se le date di consegna coincidono, evitando che ordini per date future vengano sovrascritti da richieste per il giorno corrente.
 - **Selezione Clienti Registrati**: In fase di inserimento o modifica ordine manuale, è possibile selezionare direttamente i clienti censiti con 1 click dal menu a tendina o tramite la ricerca automatica datalist.
+- **Regola Andrea Aliandro**: Riconoscimento automatico del cliente "reale" quando l'ordine è inoltrato da Andrea Aliandro, con slittamento automatico della data di consegna al giorno successivo.
 
 ### ✅ 8. Sezione Ordini Confermati, Grammatura & Lotto per Articolo
 - **Flusso Ordini Confermati**: Un ordine si sposta nel tab **ORDINI CONFERMATI** quando viene evaso dalla postazione tablet o confermato dal pulsante `✅ CONFERMA ORDINE`.
@@ -62,7 +67,7 @@ Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di te
 - **Stato Ordine Dinamico**: Passaggio automatico allo stato `CONFEZIONATO` / `CONFERMATO`.
 
 ### 🛡️ 10. Hub Amministratore Remoto & Backup DB SQLite 1-Click
-- **Accesso Protetto via Token**: Autenticazione riservata al titolare tramite token o passkey (`?token=petruzzi-secret-key`).
+- **Accesso Protetto via Token**: Autenticazione riservata al titolare tramite token o passkey configurabile (`EVOLUTION_API_KEY`).
 - **Controllo Produzione in Tempo Reale**: Monitoraggio percentuale di completamento confezionamento, distinte lavorazione e log avanzamento ordini da remoto (casa o smartphone).
 - **Backup DB SQLite**: Download 1-click del file completo del database (`petruzzi_backup_YYYYMMDD_HHMM.db`).
 
@@ -75,43 +80,42 @@ Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di te
 ## 📱 Guida all'Accesso dai Dispositivi
 
 ### 1. 🖥️ Dashboard Principale (PC Laboratorio)
-- **Indirizzo**: [http://localhost:8000](http://localhost:8000) (oppure `http://192.168.1.179:8000`)
+- **Indirizzo**: [http://localhost:5000](http://localhost:5000) (oppure `http://192.168.1.179:5000`)
 - **Utilizzo**: Gestione completa ordini, produzione casaro, filoni pizzeria, ordini confermati e statistiche.
 
 ### 2. 📲 Postazione Tablet Confezionamento (Galaxy A8)
-- **Indirizzo**: `http://192.168.1.179:8000/tablet`
-- **Istruzioni**: Collega il Tablet al Wi-Fi del laboratorio, apri Chrome su `http://192.168.1.179:8000/tablet` e salva l'icona in schermata Home.
+- **Indirizzo**: `http://192.168.1.179:5000/tablet`
+- **Istruzioni**: Collega il Tablet al Wi-Fi del laboratorio, apri Chrome su `http://192.168.1.179:5000/tablet` e salva l'icona in schermata Home.
 
 ### 3. 🛡️ Hub Amministratore Remoto (Titolare / Smartphone / Casa)
-- **Indirizzo**: `http://192.168.1.179:8000/admin?token=petruzzi-secret-key`
+- **Indirizzo**: `http://192.168.1.179:5000/admin?token=petruzzi-secret-key`
 
 ---
 
 ## 🛠️ Stack Tecnologico
 
 - **Backend Core**: FastAPI, Python 3, Uvicorn, SQLite Async (`aiosqlite`).
-- **Web Automation**: Playwright Async Python (`Chromium`).
-- **Artificial Intelligence**: Google Gemini Multimodal API (`gemini-flash-lite-latest`).
+- **Web Automation**: Evolution API (Docker).
+- **Artificial Intelligence**: Groq API (`llama-3.3-70b-versatile` e `whisper-large-v3`).
 - **PDF Engine**: ReportLab 5.0 (Generazione nativa A4).
 - **Frontend App**: Vite, React 18, Tailwind CSS, Lucide Icons, Recharts.
+- **Deployment OS**: Ottimizzato nativamente per l'esecuzione e compilazione su ambienti Windows.
 
 ---
 
 ## 🚀 Avvio & Utilizzo
 
-### Avvio Standard (Modalità Interattiva)
-```bash
-./setup.sh
-```
+### Esecuzione Diretta
+Doppio click su `PetruzziManager.exe` generato nella cartella `dist`.
 
-### Avvio in Background 24/7 (Modalità Servizio Continuo)
-```bash
-# Per avviare in sottofondo 24/7
-./start_background.sh
+### Avvio in Background 24/7 (Senza Finestra)
+Eseguire il file `start_invisibile.vbs` tramite doppio click.
 
-# Per arrestare il servizio in sottofondo
-./stop_background.sh
-```
+### Avvio Motore WhatsApp (Evolution API)
+Eseguire `avvia_whatsapp.bat` per gestire Docker e l'Evolution API.
+
+### Compilazione del File Eseguibile (.exe)
+Lanciare `crea_eseguibile.bat` per installare l'ambiente e generare l'eseguibile Windows.
 
 ---
 
