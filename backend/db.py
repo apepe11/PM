@@ -69,6 +69,47 @@ def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = 
 
     return None
 
+
+async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_target: Optional[str], finestra_giorni: int = 7):
+    """
+    Cerca, tra gli ordini recenti del cliente (ultimi `finestra_giorni` giorni),
+    quello la cui data di consegna (calcolata/normalizzata) coincide con
+    `data_consegna_target`. Questo evita di accodare un nuovo messaggio a un
+    ordine esistente ma destinato a una consegna diversa (es. un ordine per
+    la settimana prossima ancora "aperto" quando arriva un messaggio nuovo
+    per la consegna di domani).
+
+    Se `data_consegna_target` è None (impossibile determinarlo), ricade sul
+    vecchio comportamento: il primo ordine ancora "aperto" (data_consegna
+    nulla o futura/odierna) più recente.
+
+    Ritorna la riga (id, testo_originale, dati_estratti_ia, data_ricezione)
+    oppure None se nessun ordine corrisponde.
+    """
+    limite_ricezione = (datetime.now() - timedelta(days=finestra_giorni)).strftime('%Y-%m-%d %H:%M:%S')
+    cursor = await db.execute(
+        "SELECT id, testo_originale, dati_estratti_ia, data_ricezione FROM ordini "
+        "WHERE mittente = ? AND data_ricezione >= ? ORDER BY data_ricezione DESC LIMIT 15",
+        (mittente, limite_ricezione)
+    )
+    rows = await cursor.fetchall()
+    today_str = datetime.now().strftime('%Y-%m-%d')
+
+    for row in rows:
+        id_ord, testo_orig, dati_ia_raw, data_ric = row
+        dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
+        data_consegna_ord = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
+
+        if data_consegna_target is not None:
+            if data_consegna_ord == data_consegna_target:
+                return row
+        else:
+            if not data_consegna_ord or data_consegna_ord >= today_str:
+                return row
+
+    return None
+
+
 CATALOGO_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "catalogo_prodotti.json"))
 PARTICOLARITA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
 PRODOTTI_MAP = {}
@@ -123,7 +164,11 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
             "traduzione_ia": dati_ia.get("prodotti", [])
         }
 
-        note_ext = dati_ia.get("note_ordine", "").strip()
+        # 🩹 FIX: dict.get(key, default) usa il default SOLO se la chiave manca,
+        # non se è presente con valore None. Se l'IA restituisce note_ordine: None
+        # questo sollevava AttributeError su .strip() (silenziato dal try/except
+        # esterno, ma con perdita dell'aggiornamento del profilo cliente).
+        note_ext = (dati_ia.get("note_ordine") or "").strip()
 
         if found_client:
             if phone_number and not found_client.get("telefono"):
@@ -217,24 +262,18 @@ async def init_db():
         print("🗄️ Database Locale SQLite pronto.")
 
 async def get_storico_oggi(mittente: str) -> str:
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    # 🩹 FIX: prima si prendeva sempre l'ultimo ordine ricevuto (se ancora
+    # "aperto"), anche se destinato a una consegna futura scollegata
+    # (es. settimana prossima). Ora si cerca lo storico dell'ordine la cui
+    # data di consegna coincide con quella che avrebbe un messaggio
+    # arrivato adesso (il "default" calcolato da _calcola_data_consegna_target_pura),
+    # così l'IA riceve come contesto solo lo storico realmente pertinente.
+    target_data_consegna = _calcola_data_consegna_target_pura(datetime.now()).strftime('%Y-%m-%d')
     async with aiosqlite.connect(DB_FILE) as db:
-        cursor = await db.execute(
-            "SELECT testo_originale, dati_estratti_ia, data_ricezione FROM ordini WHERE mittente = ? ORDER BY data_ricezione DESC LIMIT 1",
-            (mittente,)
-        )
-        row = await cursor.fetchone()
+        row = await _trova_ordine_esistente_per_data(db, mittente, target_data_consegna)
         if not row:
             return ""
-        
-        testo_orig, dati_ia_raw, data_ric = row
-        dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
-
-        data_consegna = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
-        if not data_consegna or data_consegna >= today_str:
-            return testo_orig
-        
-        return ""
+        return row[1]  # testo_originale
 
 async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str] = None) -> bool:
     async with aiosqlite.connect(DB_FILE) as db:
@@ -249,35 +288,33 @@ async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str]
         return bool(row)
 
 async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estratti: str, data_ricezione_custom: Optional[str] = None):
-    today_str = datetime.now().strftime('%Y-%m-%d')
     async with aiosqlite.connect(DB_FILE) as db:
-        cursor = await db.execute(
-            "SELECT id, testo_originale, dati_estratti_ia, data_ricezione FROM ordini WHERE mittente = ? ORDER BY data_ricezione DESC LIMIT 1",
-            (mittente,)
-        )
-        row = await cursor.fetchone()
-        
-        target_id = None
-        storico_precedente = ""
-        
-        if row:
-            id_ord, testo_orig, dati_ia_raw, data_ric = row
-            dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
-
-            data_consegna = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
-            if not data_consegna or data_consegna >= today_str:
-                target_id = id_ord
-                storico_precedente = testo_orig
-
         now_str = data_ricezione_custom if data_ricezione_custom else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        # 🩹 FIX: risolvi/correggi la data di consegna del NUOVO messaggio
+        # PRIMA di decidere a quale ordine accodarlo. Prima si prendeva
+        # semplicemente l'ultimo ordine ricevuto dal cliente (se ancora
+        # "aperto" cioè data_consegna >= oggi): un ordine futuro per la
+        # settimana prossima veniva così "riaperto" e sporcato da un
+        # messaggio completamente nuovo destinato a domani.
         try:
             dati_json = json.loads(dati_estratti)
-            corrected_date = normalize_data_consegna(dati_json.get("data_consegna"), now_str)
-            if corrected_date and dati_json.get("data_consegna") != corrected_date:
-                dati_json["data_consegna"] = corrected_date
-                dati_estratti = json.dumps(dati_json, ensure_ascii=False)
         except Exception:
-            pass
+            dati_json = {}
+
+        corrected_date = normalize_data_consegna(dati_json.get("data_consegna"), now_str)
+        if corrected_date and dati_json.get("data_consegna") != corrected_date:
+            dati_json["data_consegna"] = corrected_date
+            dati_estratti = json.dumps(dati_json, ensure_ascii=False)
+
+        # Cerca un ordine esistente per lo STESSO cliente E la STESSA data di
+        # consegna del nuovo messaggio, invece che il semplice "ultimo ordine".
+        row = await _trova_ordine_esistente_per_data(db, mittente, corrected_date)
+
+        target_id = None
+        storico_precedente = ""
+        if row:
+            target_id, storico_precedente = row[0], row[1]
 
         if target_id:
             # 🛡️ SCUDO ANTI-LOOP TOTALE (BIDIREZIONALE)

@@ -23,7 +23,7 @@ echo ⬆️ Aggiornamento pip, setuptools e wheel...
 python -m pip install --upgrade pip setuptools wheel
 
 echo 📦 Installazione dipendenze Python...
-pip install fastapi uvicorn aiosqlite playwright reportlab pydantic google-generativeai
+pip install fastapi uvicorn aiosqlite reportlab pydantic google-generativeai requests
 
 if exist frontend\package.json (
     echo 📦 Installazione dipendenze frontend...
@@ -34,8 +34,5 @@ if exist frontend\package.json (
     popd
 )
 
-echo 🌐 Installazione browser Playwright...
-python -m playwright install chromium
-
-echo 🚀 Avvio dell'app Petruzzi...
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+echo 🚀 Avvio dell'app Petruzzi sulla porta 5000...
+python -m uvicorn main:app --host 0.0.0.0 --port 5000

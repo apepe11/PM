@@ -6,3 +6,4 @@ reportlab>=4.0.0
 pydantic>=1.10.0
 google-generativeai>=0.8.0        # ⬅️ Cambiato da 0.22.0 a 0.8.0
 python-dotenv>=1.0.0
+groq

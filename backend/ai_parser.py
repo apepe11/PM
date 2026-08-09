@@ -1,4 +1,3 @@
-import importlib
 import os
 import re
 import json
@@ -6,52 +5,75 @@ import time
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from typing import Any, Optional, cast
+from typing import Optional
 
 from dotenv import load_dotenv
+from groq import Groq
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY non impostata. Creare un file .env con GEMINI_API_KEY=...")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY non impostata. Creare un file .env con GROQ_API_KEY=...")
 
-_genai_module = importlib.import_module("google.generativeai")
-genai = cast(Any, _genai_module)
-if hasattr(genai, "configure"):
-    genai.configure(api_key=GEMINI_API_KEY)
+client_groq = Groq(api_key=GROQ_API_KEY)
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
-GEMINI_LOCK = asyncio.Lock()
-LAST_GEMINI_REQUEST_TIME = 0.0
+GROQ_LOCK = asyncio.Lock()
+LAST_GROQ_REQUEST_TIME = 0.0
 
 def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None) -> tuple[datetime, str]:
     """
-    Calcola la data di consegna target in base all'orario in cui il CLIENTE ha inviato il messaggio.
+    Calcola la data di consegna target gestendo la chiusura domenicale e la deadline delle 08:00.
     """
     if ora_attuale is None:
         ora_attuale = datetime.now()
 
     h = ora_attuale.hour
+    wd = ora_attuale.weekday() # 0=Lunedì, ..., 5=Sabato, 6=Domenica
 
-    if h < 8:
-        data_target = ora_attuale
+    # --- REGOLE WEEKEND: Da Sabato 08:00 a Lunedì 07:59 -> Consegna Lunedì ---
+    if (wd == 5 and h >= 8) or (wd == 6) or (wd == 0 and h < 8):
+        if wd == 5:   # Sabato
+            days_add = 2
+        elif wd == 6: # Domenica
+            days_add = 1
+        else:         # Lunedì
+            days_add = 0
+            
+        data_target = ora_attuale + timedelta(days=days_add)
         desc = (
-            f"📅 REGOLE TEMPORALI (< 08:00):\n"
-            f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
-            f"Essendo arrivato prima delle 08:00, la data di consegna di default (se il cliente dice 'oggi') è lo stesso giorno: \"{data_target.strftime('%Y-%m-%d')}\"."
+            f"📅 REGOLE TEMPORALI WEEKEND (NO DOMENICA):\n"
+            f"Il messaggio è stato inviato in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
+            f"Essendo arrivato nel periodo tra Sabato alle 08:00 e Lunedì alle 08:00, la consegna SLITTA TASSATIVAMENTE A LUNEDÌ.\n"
+            f"Data di consegna di default: \"{data_target.strftime('%Y-%m-%d')}\"."
         )
+    # --- REGOLE INFRASETTIMANALI ---
     else:
-        data_target = ora_attuale + timedelta(days=1)
-        desc = (
-            f"📅 REGOLE TEMPORALI (>= 08:00):\n"
-            f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
-            f"Avendo superato le 08:00, l'ordine SLITTA AUTOMATICAMENTE al giorno dopo.\n"
-            f"Data di consegna di default (se il cliente dice 'per domani'): \"{data_target.strftime('%Y-%m-%d')}\"."
-        )
+        if h < 8:
+            data_target = ora_attuale
+            desc = (
+                f"📅 REGOLE TEMPORALI (< 08:00):\n"
+                f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
+                f"Essendo arrivato prima delle 08:00, la data di consegna di default (se il cliente dice 'oggi') è lo stesso giorno: \"{data_target.strftime('%Y-%m-%d')}\"."
+            )
+        else:
+            data_target = ora_attuale + timedelta(days=1)
+            # Controllo extra: se infrasettimanale ma cade di domenica, passa a lunedì (es. Venerdì dopo le 8 + dopodomani)
+            if data_target.weekday() == 6:
+                data_target += timedelta(days=1)
+                
+            desc = (
+                f"📅 REGOLE TEMPORALI (>= 08:00):\n"
+                f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
+                f"Avendo superato le 08:00, l'ordine SLITTA AUTOMATICAMENTE al giorno lavorativo successivo.\n"
+                f"Data di consegna di default (se il cliente dice 'per domani'): \"{data_target.strftime('%Y-%m-%d')}\"."
+            )
 
     return data_target, desc
+
 class AIParser:
     def __init__(self, base_dir="catalogo"):
         self.base_dir = base_dir
@@ -80,7 +102,7 @@ class AIParser:
     def is_courtesy_or_non_order(self, text: str) -> bool:
         if not text:
             return True
-        t_lower = text.lower().strip()
+        t_lower = (text or "").lower().strip()
 
         if t_lower in {'vocale o media', 'vocale', 'media', 'audio', 'foto', 'immagine', 'sticker', 'adesivo'}:
             return True
@@ -112,7 +134,7 @@ class AIParser:
         return False
 
     def get_specific_client_rules(self, client_name: str) -> str:
-        client_name_lower = client_name.lower()
+        client_name_lower = (client_name or "").lower()
         lista_clienti = self.client_rules.get("clienti", [])
         
         for cliente in lista_clienti:
@@ -130,41 +152,48 @@ class AIParser:
                 if mozz_def: rule_text += f"- Se ordina mozzarella senza specificare, intende: {mozz_def}\n"
                 
                 if storico:
-                    rule_text += "- ESEMPI STORICI (TRADUCI ESATTAMENTE COSÌ I SUOI ORDINI):\n"
-                    for es in storico:
+                    # Limitiamo i token anche qui prendendo solo l'ultimo storico
+                    es = storico[0] if len(storico) > 0 else None
+                    if es:
+                        rule_text += "- ESEMPIO STORICO (TRADUCI ESATTAMENTE COSÌ I SUOI ORDINI):\n"
                         rule_text += f"  * Messaggio: \"{es.get('messaggio_raw')}\"\n"
-                        rule_text += f"    Traduzione IA Richiesta: {json.dumps(es.get('traduzione_ia'), ensure_ascii=False)}\n"
+                        rule_text += f"    Traduzione: {json.dumps(es.get('traduzione_ia'), separators=(',', ':'), ensure_ascii=False)}\n"
                         
                 return rule_text
         return ""
 
     def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = "", message_timestamp: Optional[datetime] = None):
-        catalog_formatted = json.dumps(self.catalog, indent=2, ensure_ascii=False)
-        sinonimi_formatted = json.dumps(self.synonyms_map, indent=2, ensure_ascii=False)
+        # 1. COMPRESSIONE ESTREMA DEL CATALOGO: Solo i campi strettamente necessari
+        catalogo_compresso = []
+        for p in self.catalog:
+            catalogo_compresso.append({
+                "cod": p.get("codice_articolo", p.get("codice_prodotto")),
+                "nome": p.get("nome_articolo", p.get("nome_prodotto")),
+                "um": p.get("unita_misura", p.get("unita_di_misura", "kg")).lower()
+            })
         
-        regole_cliente = ""
-        if client_name:
-            client_rules = {c.get('nome_cliente', ''): c for c in self.client_rules.get('clienti', [])}
-            if client_name in client_rules:
-                p = client_rules[client_name]
-                regole_cliente = f"\nREGOLE PARTICOLARI PER CLIENTE '{client_name}': {json.dumps(p, ensure_ascii=False)}\n"
+        # 2. RIMOZIONE SPAZI BIANCHI: Riduciamo drasticamente i token JSON
+        catalog_formatted = json.dumps(catalogo_compresso, separators=(',', ':'), ensure_ascii=False)
+        
+        regole_cliente = self.get_specific_client_rules(client_name)
 
-        campioni_block = f"\nSTORICO CAMPIONI CONFERMATI PER IL CLIENTE '{client_name}':\n{campioni_passati_str}\n" if campioni_passati_str else ""
+        campioni_block = f"\nSTORICO CAMPIONI CONFERMATI '{client_name}':\n{campioni_passati_str}\n" if campioni_passati_str else ""
 
         data_target, descrizione_slot = calcola_data_consegna_target(message_timestamp)
         data_default_str = data_target.strftime('%Y-%m-%d')
 
         return f"""Sei l'assistente IA del Caseificio Petruzzi. 
-            Il tuo compito è analizzare la conversazione WhatsApp con il cliente ed estrarre l'ordine FINALE CONSOLIDATO.
+            Il tuo compito è analizzare la conversazione WhatsApp ed estrarre l'ordine FINALE CONSOLIDATO.
+            Restituisci UNICAMENTE un oggetto JSON valido, senza aggiungere commenti, spiegazioni o blocchi markdown.
 
-            REGOLE TASSATIVE PER L'ANALISI DELLA CONVERSAZIONE NELLA SUA INTEREZZA:
-            1. ANALISI STORICO COMPLETO: Ti viene fornito lo "STORICO CONVERSAZIONE DI OGGI CON {client_name}" ed il "NUOVO MESSAGGIO". DEVI VALUTARE LA CONVERSAZIONE NELLA SUA INTEREZZA!
-            2. AGGIUNTE / INTEGRAZIONI: Se il cliente invia messaggi aggiuntivi (es. "aggiungi anche 2kg trecce"), DEVI SOMMARE o AGGIUNGERE i nuovi prodotti a quelli richiesti in precedenza.
-            3. CORREZIONI / SOSTITUZIONI: Se il cliente corregge un messaggio precedente (es. "cambia la mozzarella da 5kg a 3kg"), DEVI APPLICARE LA MODIFICA nel risultato finale.
-            4. ANNULLAMENTO DELL'ORDINE: Se il cliente richiede di annullare o cancellare l'ordine, imposta "is_cancelled": true e svuota l'array dei prodotti.
+            REGOLE TASSATIVE:
+            1. ANALISI STORICO COMPLETO: Valuta lo "STORICO CONVERSAZIONE DI OGGI" ed il "NUOVO MESSAGGIO" assieme.
+            2. AGGIUNTE / INTEGRAZIONI: Somma i nuovi prodotti a quelli richiesti in precedenza.
+            3. CORREZIONI / SOSTITUZIONI: Applica le modifiche richieste nel risultato finale.
+            4. ANNULLAMENTO DELL'ORDINE: Se richiesto, imposta "is_cancelled": true e svuota l'array dei prodotti.
 
             REGOLE TASSATIVE DATA DI CONSEGNA:
-            1. SE NON SPECIFICATO -> CONSEGNA TASSATIVA: Usa la DATA DI DEFAULT: "{data_default_str}".
+            1. SE NON SPECIFICATO -> CONSEGNA TASSATIVA: "{data_default_str}".
             {descrizione_slot}
 
             CATALOGO PRODOTTI UFFICIALE:
@@ -172,32 +201,31 @@ class AIParser:
             {regole_cliente}
             {campioni_block}
 
-            REGOLE DI MAPPATURA E UNITA' DI MISURA (IMPORTANZA ESTREMA):
-            1. STRACCIATELLA AD-HOC: Se il cliente è "Sole 365", la stracciatella generica DEVE ESSERE "STRACPE" (sfusa 1kg). Altrimenti, DEVE ESSERE "STRA20250PE" (vaschetta 0,250KG).
-            2. UNITA' DI MISURA DA USARE:
-               - Se il cliente ordina PEZZI, NUMERI INTERI O COPPIE (es. "2 stracciatella", "15 filoni", "5 coppie di silani"), DEVI INSERIRE "unita_di_misura": "pezzi" e come "quantita" il numero di pezzi (NB: 1 coppia = 2 pezzi, quindi 5 coppie = 10 pezzi).
-               - Se il cliente ordina CHILI o GRAMMI (es. "2 kg di stracciatella", "1 hg di bocconcini"), DEVI INSERIRE "unita_di_misura": "kg" e convertire i grammi in kg (es. 1 hg = 0.1 kg).
-               - NON ESEGUIRE TU IL CALCOLO MATEMATICO DEI PEZZI IN CHILI. Assegna semplicemente i "pezzi", Python lo farà per te!
+            REGOLE DI MAPPATURA E UNITA' DI MISURA:
+            1. STRACCIATELLA: Se il cliente è "Sole 365" -> "STRACPE" (sfusa 1kg). Altrimenti -> "STRA20250PE" (vaschetta 0,250KG).
+            2. UNITA' DI MISURA:
+               - PEZZI/INTERI/COPPIE -> "unita_di_misura": "pezzi", "quantita": numero (1 coppia = 2 pezzi).
+               - CHILI/GRAMMI -> "unita_di_misura": "kg", convertire grammi in kg (1 hg = 0.1 kg).
 
-            RISPONDI ESCLUSIVAMENTE CON UN OGGETTO JSON PURO SENZA FORMATTAZIONI MARKDOWN (NO ```json):
+            SCHEMA JSON RICHIESTO:
             {{
-            "testo_trascritto": "trascrizione testuale integrale in italiano",
-            "is_order": true/false,
-            "is_cancelled": true/false,
+            "testo_trascritto": "trascrizione in italiano",
+            "is_order": true,
+            "is_cancelled": false,
             "data_consegna": "YYYY-MM-DD",
             "prodotti": [
                 {{
-                "codice_articolo": "CODICE_ESATTO",
+                "codice_articolo": "STRINGA",
                 "quantita": 1.0,
-                "unita_di_misura": "kg" / "pezzi"
+                "unita_di_misura": "kg"
                 }}
             ],
-            "note_ordine": "eventuali note esplicative",
+            "note_ordine": "stringa",
             "da_verificare_manualmente": false
             }}"""
 
     async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg", message_timestamp: Optional[datetime] = None):
-        global LAST_GEMINI_REQUEST_TIME
+        global LAST_GROQ_REQUEST_TIME
 
         if not audio_data and self.is_courtesy_or_non_order(text_to_parse):
             return {
@@ -212,51 +240,44 @@ class AIParser:
         campioni = await get_campioni_ia_cliente(client_name)
         campioni_str = ""
         if campioni:
-            campioni_str = "\n".join([f"- Input: \"{c['testo_originale']}\" -> Traduzione confermata: {json.dumps(c['dati_confermati'], ensure_ascii=False)}" for c in campioni])
+            # 3. LIMITAZIONE CAMPIONI: Riduciamo i token prendendo solo gli ultimi 2 esempi storici
+            campioni = campioni[:2]
+            campioni_str = "\n".join([f"- In:\"{c.get('testo_originale', '')}\"->Out:{json.dumps(c.get('dati_confermati', {}), separators=(',', ':'), ensure_ascii=False)}" for c in campioni])
 
-        max_attempts = 2
+        max_attempts = 3
         for attempt in range(max_attempts):
-            async with GEMINI_LOCK:
+            async with GROQ_LOCK:
                 now = time.time()
-                elapsed = now - LAST_GEMINI_REQUEST_TIME
-                min_pacing = 4.0
+                elapsed = now - LAST_GROQ_REQUEST_TIME
+                min_pacing = 0.5
                 if elapsed < min_pacing:
-                    wait_time = min_pacing - elapsed
-                    logging.info(f"⏳ Spaziatura rate-limit Gemini ({wait_time:.1f}s)...")
-                    await asyncio.sleep(wait_time)
-                LAST_GEMINI_REQUEST_TIME = time.time()
+                    await asyncio.sleep(min_pacing - elapsed)
+                LAST_GROQ_REQUEST_TIME = time.time()
 
             try:
                 prompt_sistema = self.build_system_instruction(client_name, campioni_str, message_timestamp)
-                
-                model = genai.GenerativeModel( 
-                    model_name='gemini-flash-lite-latest',
-                    system_instruction=prompt_sistema
-                )
                 
                 if storico_oggi:
                     prompt_utente = f"STORICO CONVERSAZIONE DI OGGI CON {client_name}:\n{storico_oggi}\n\nNUOVO MESSAGGIO DI CORREZIONE/AGGIUNTA:\n\"{text_to_parse}\""
                 else:
                     prompt_utente = f"Messaggio ricevuto da {client_name}:\n\"{text_to_parse}\""
-                
-                if audio_data:
-                    prompt_utente += "\n(Ascolta l'audio allegato ed estrai i prodotti ordinati dal cliente)"
-                    contents = [
-                        prompt_utente,
-                        {
-                            "mime_type": mime_type,
-                            "data": audio_data
-                        }
-                    ]
-                else:
-                    contents = prompt_utente
 
-                response = await model.generate_content_async(
-                    contents,
-                    generation_config={"temperature": 0.0, "response_mime_type": "application/json"}
+                completion = client_groq.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[
+                        {"role": "system", "content": prompt_sistema},
+                        {"role": "user", "content": prompt_utente}
+                    ],
+                    temperature=0.0
                 )
                 
-                raw_text = response.text.strip()
+                raw_text = (completion.choices[0].message.content or "").strip()
+                
+                if raw_text.startswith("```"):
+                    raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
+                    raw_text = re.sub(r'\s*```$', '', raw_text)
+                    raw_text = raw_text.strip()
+
                 parsed_json = json.loads(raw_text)
                 parsed_json["cliente_id"] = client_name
 
@@ -266,19 +287,16 @@ class AIParser:
                     cod = p.get("codice_articolo", "")
                     nome = (p.get("nome_articolo") or "").lower()
                     qta = float(p.get("quantita", 1.0))
-                    um = p.get("unita_di_misura", "kg").lower()
+                    um = (p.get("unita_di_misura") or "kg").lower()
 
                     if "stracciatella" in nome or cod in ["STRACPE", "STRA20250PE"]:
                         if is_sole_365:
                             p["codice_articolo"] = "STRACPE"
                             p["nome_articolo"] = "Stracciatella Petruzzi (Sfusa 1kg)"
-                            nome = "Stracciatella Petruzzi (Sfusa 1kg)".lower()
                         else:
                             p["codice_articolo"] = "STRA20250PE"
                             p["nome_articolo"] = "Stracciatella Petruzzi 0,250KG"
-                            nome = "Stracciatella Petruzzi 0,250KG".lower()
 
-                    import re
                     match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', nome.replace(',', '.'))
                     peso_unitario = float(match_kg.group(1)) if match_kg else 0.0
 
@@ -289,21 +307,18 @@ class AIParser:
                 return parsed_json
 
             except Exception as e:
-                err_str = str(e)
-                if "429" in err_str or "quota" in err_str.lower() or "resourceexhausted" in err_str.lower():
-                    if attempt == 0:
-                        logging.warning("⚠️ Quota Gemini temporanea. Pausa di 4s prima di riprovare con l'IA...")
-                        await asyncio.sleep(4.0)
-                        continue
-                
-                logging.error(f"❌ Errore IA: {e}. Attivazione Parser Locale di riserva.")
+                logging.warning(f"⚠️ Tentativo {attempt + 1} Groq fallito ({e}). Riprovo...")
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(1.0)
+                    continue
+
+                logging.error(f"❌ Errore definitivo Groq IA: {e}. Attivazione Parser Locale di riserva.")
                 return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
 
         return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
 
     def fallback_local_parse(self, text_to_parse: str, client_name: str, message_timestamp: Optional[datetime] = None) -> dict:
-        # Scarta subito se il testo è dominato da cifre tipiche di telefono/orario
-        testo_pulito_cifre = re.sub(r'[\s\-\.\(\)\+:]', '', text_to_parse)
+        testo_pulito_cifre = re.sub(r'[\s\-\.\(\)\+:]', '', text_to_parse or "")
         if testo_pulito_cifre.isdigit() and len(testo_pulito_cifre) >= 6:
             return {
                 "is_order": False, "is_cancelled": False, "cliente_id": client_name,
@@ -319,10 +334,10 @@ class AIParser:
             cod = item.get("codice_articolo")
             nome = item.get("nome_articolo", "")
             um = (item.get("unita_misura") or "kg").lower()
-            syns = [s.strip().lower() for s in item.get("sinonimi", "").split(",") if s.strip()]
+            syns = [s.strip().lower() for s in (item.get("sinonimi") or "").split(",") if s.strip()]
             syn_entries.append({"cod": cod, "nome": nome, "um": um, "sinonimi": syns})
 
-        matches = re.findall(r'(?:n[°\s]*)?(\d+(?:[.,]\d+)?)\s*([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{2,30})', text_to_parse, re.IGNORECASE)
+        matches = re.findall(r'(?:n[°\s]*)?(\d+(?:[.,]\d+)?)\s*([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{2,30})', text_to_parse or "", re.IGNORECASE)
 
         for qta_str, prod_raw in matches:
             try:
@@ -330,11 +345,10 @@ class AIParser:
             except ValueError:
                 qta = 1.0
 
-            # Scarta quantità implausibili (probabile falso positivo, es. orario "14:30" letto come "14")
             if qta <= 0 or qta > 500:
                 continue
 
-            p_clean = prod_raw.strip().lower()
+            p_clean = (prod_raw or "").strip().lower()
             matched_entry = None
             
             for entry in syn_entries:
@@ -353,8 +367,51 @@ class AIParser:
                     "unita_di_misura": matched_entry["um"]
                 })
 
+        # --- LOGICA DI RICONOSCIMENTO TEMPORALE NEL PARSER DI RISERVA ---
+        base_dt = message_timestamp if message_timestamp else datetime.now()
+        t_lower = (text_to_parse or "").lower()
+        
+        # Sfruttiamo la nuova funzione con le regole del weekend (no domenica)
         data_target, _ = calcola_data_consegna_target(message_timestamp)
-        is_canc = bool(re.search(r'\b(?:annulla|cancella|disdici|elimina|non portarmi|non mi serve)\b', text_to_parse, re.IGNORECASE))
+        
+        if "dopodomani" in t_lower:
+            data_target = base_dt + timedelta(days=2)
+            # Salta la domenica
+            if data_target.weekday() == 6: 
+                data_target += timedelta(days=1)
+        elif "domani" in t_lower:
+            data_target = base_dt + timedelta(days=1)
+            # Salta la domenica
+            if data_target.weekday() == 6: 
+                data_target += timedelta(days=1)
+        else:
+            # Riconoscimento giorni della settimana
+            giorni_map = {
+                "lunedì": 0, "lunedi": 0,
+                "martedì": 1, "martedi": 1,
+                "mercoledì": 2, "mercoledi": 2,
+                "giovedì": 3, "giovedi": 3,
+                "venerdì": 4, "venerdi": 4,
+                "sabato": 5,
+                "domenica": 6
+            }
+            giorno_trovato = None
+            for g_str, g_idx in giorni_map.items():
+                if f"per {g_str}" in t_lower or f"a {g_str}" in t_lower or f"per il {g_str}" in t_lower or re.search(rf'\b{g_str}\b', t_lower):
+                    giorno_trovato = g_idx
+                    break
+            
+            if giorno_trovato is not None:
+                current_weekday = base_dt.weekday()
+                days_ahead = giorno_trovato - current_weekday
+                if days_ahead <= 0:
+                    days_ahead += 7
+                data_target = base_dt + timedelta(days=days_ahead)
+                # Anche qui, se per caso forza 'domenica', lo spostiamo in automatico a lunedì
+                if data_target.weekday() == 6:
+                    data_target += timedelta(days=1)
+
+        is_canc = bool(re.search(r'\b(?:annulla|cancella|disdici|elimina|non portarmi|non mi serve)\b', t_lower, re.IGNORECASE))
 
         return {
             "is_order": not is_canc and len(prodotti_trovati) > 0,
