@@ -9,7 +9,8 @@ from backend.db import (
 
 async def invia_messaggio_whatsapp_singolo(page, destinatario: str, messaggio: str) -> bool:
     """Invia un messaggio WhatsApp ad un singolo contatto tramite Playwright Web."""
-    if not page:
+    if not page or page.is_closed():
+        logging.warning(f"⚠️ Broadcast: pagina non disponibile, invio a '{destinatario}' saltato.")
         return False
     try:
         # Cerca il contatto e clicca per aprire la chat
@@ -33,19 +34,27 @@ async def invia_messaggio_whatsapp_singolo(page, destinatario: str, messaggio: s
 
         # Scrive il messaggio nella casella di testo e simula l'invio
         sent = await page.evaluate(f'''(text) => {{
-            const footer = document.querySelector('footer');
-            if (!footer) return false;
-            const input = footer.querySelector('div[contenteditable="true"]');
-            if (!input) return false;
-            input.focus();
-            document.execCommand('insertText', false, text);
-            
-            setTimeout(() => {{
-                const sendBtn = footer.querySelector('span[data-icon="send"]') || footer.querySelector('button');
-                if (sendBtn) sendBtn.click();
-            }}, 300);
-            
-            return true;
+            return new Promise((resolve) => {{
+                const footer = document.querySelector('footer');
+                if (!footer) return resolve(false);
+                const input = footer.querySelector('div[contenteditable="true"]');
+                if (!input) return resolve(false);
+                input.focus();
+                document.execCommand('insertText', false, text);
+
+                setTimeout(() => {{
+                    const sendBtn = footer.querySelector('span[data-icon="send"]') || footer.querySelector('button[aria-label*="Invia"]') || footer.querySelector('button');
+                    if (sendBtn) {{
+                        sendBtn.click();
+                        setTimeout(() => {{
+                            const stillThere = input.innerText && input.innerText.trim().length > 0;
+                            resolve(!stillThere);
+                        }}, 500);
+                    }} else {{
+                        resolve(false);
+                    }}
+                }}, 300);
+            }});
         }}''', messaggio)
 
         await asyncio.sleep(2)
@@ -111,6 +120,10 @@ async def avvia_demone_broadcast(page_getter_func):
                     messaggio = item.get("messaggio", "")
 
                     for c in contatti:
+                        page = page_getter_func()
+                        if not page or page.is_closed():
+                            logging.warning(f"⚠️ Broadcast ID #{item['id']}: WhatsApp disconnesso, interrompo invii rimanenti.")
+                            break
                         nome_dest = c.get("nome") or c.get("telefono") or str(c)
                         esito = await invia_messaggio_whatsapp_singolo(page, nome_dest, messaggio)
                         stato_log = "INVIATO" if esito else "FALLITO"

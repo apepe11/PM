@@ -10,7 +10,7 @@ import BroadcastManager from './components/BroadcastManager';
 import AnalisiStatistica from './components/AnalisiStatistica';
 import ConnessioneBanco from './components/ConnessioneBanco';
 import OrdiniModal from './components/OrdiniModal';
-import { Printer, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { Printer, CheckCircle, AlertCircle } from 'lucide-react';
 
 export default function App() {
   const isTabletPath = typeof window !== 'undefined' && window.location.pathname === '/tablet';
@@ -19,24 +19,25 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(
     isBroadcastPath ? 'broadcast' : (isAdminPath ? 'admin' : (isTabletPath ? 'tablet' : 'produzione'))
   );
+  
   const getDeliveryDateDefault = () => {
     const now = new Date();
-    const w = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const w = now.getDay();
     const h = now.getHours();
 
     let daysAhead = 0;
     if ((w === 6 && h >= 8) || w === 0 || (w === 1 && h < 8)) {
-      if (w === 6) daysAhead = 2;       // Sabato >= 08:00 -> Lunedì (+2)
-      else if (w === 0) daysAhead = 1;  // Domenica -> Lunedì (+1)
-      else daysAhead = 0;               // Lunedì < 08:00 -> Lunedì (0)
+      if (w === 6) daysAhead = 2;
+      else if (w === 0) daysAhead = 1;
+      else daysAhead = 0;
     } else if (h >= 8) {
       daysAhead = 1;
     }
     now.setDate(now.getDate() + daysAhead);
     return now.toISOString().split('T')[0];
   };
+
   const [selectedDate, setSelectedDate] = useState(getDeliveryDateDefault());
-  
   const [ordini, setOrdini] = useState([]);
   const [produzione, setProduzione] = useState([]);
   const [statistiche, setStatistiche] = useState(null);
@@ -53,28 +54,24 @@ export default function App() {
   const fetchDashboardData = async () => {
     setIsRefreshing(true);
     try {
-      // 1. Fetch Ordini
       const resOrdini = await fetch(`${API_BASE}/ordini`);
       if (resOrdini.ok) {
         const dataOrdini = await resOrdini.json();
         setOrdini(dataOrdini);
       }
 
-      // 2. Fetch Produzione Aggregata
       const resProd = await fetch(`${API_BASE}/produzione?data=${selectedDate}`);
       if (resProd.ok) {
         const dataProd = await resProd.json();
         setProduzione(dataProd);
       }
 
-      // 3. Fetch Statistiche
       const resStats = await fetch(`${API_BASE}/statistiche`);
       if (resStats.ok) {
         const dataStats = await resStats.json();
         setStatistiche(dataStats);
       }
 
-      // 4. Fetch Catalogo Prodotti (una tantum)
       if (prodottiCatalogo.length === 0) {
         const resCat = await fetch(`${API_BASE}/prodotti`);
         if (resCat.ok) {
@@ -100,7 +97,6 @@ export default function App() {
 
   useEffect(() => {
     fetchDashboardData();
-    // Real-time polling ad alta frequenza (ogni 3 secondi) per rilevamento immediato dei vocali trascritti e ordini WhatsApp
     const interval = setInterval(fetchDashboardData, 3000);
     return () => clearInterval(interval);
   }, [selectedDate]);
@@ -123,7 +119,6 @@ export default function App() {
   const handleSaveOrder = async (orderData) => {
     try {
       if (orderData.id) {
-        // PUT update
         const res = await fetch(`${API_BASE}/ordini/${orderData.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -138,7 +133,6 @@ export default function App() {
           fetchDashboardData();
         }
       } else {
-        // POST create
         const res = await fetch(`${API_BASE}/ordini`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -173,15 +167,19 @@ export default function App() {
     }
   };
 
-  const handleConfirmOrder = async (orderId) => {
+  // Funzione diretta: legge dal componente in linea senza modale
+  const handleConfirmOrderInline = async (orderId, lotto, prodottiAggiornati) => {
     try {
       const res = await fetch(`${API_BASE}/ordini/${orderId}/conferma`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({
+          numero_lotto: lotto,
+          prodotti: prodottiAggiornati
+        })
       });
       if (res.ok) {
-        showToast('✅ Ordine confermato e passato a Ordini Confermati!');
+        showToast('✅ Ordine confermato e salvato con successo!');
         fetchDashboardData();
       } else {
         showToast("Errore durante la conferma dell'ordine", 'error');
@@ -218,7 +216,6 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF6F0] text-petruzzi-950 selection:bg-petruzzi-300 selection:text-petruzzi-950">
       
-      {/* Toast Notification */}
       {toastMessage && (
         <div className={`fixed bottom-6 right-6 z-50 flex items-center space-x-2 px-5 py-3 rounded-2xl shadow-2xl border text-sm font-bold transition-all animate-bounce ${
           toastMessage.type === 'error'
@@ -230,7 +227,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Main App Header */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -242,7 +238,6 @@ export default function App() {
         isRefreshing={isRefreshing}
       />
 
-      {/* Main Workspace Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'produzione' && (
           <ProduzioneGiornaliera
@@ -269,7 +264,7 @@ export default function App() {
             setSelectedDate={setSelectedDate}
             onEditOrder={handleOpenEditOrderModal}
             onDeleteOrder={handleDeleteOrder}
-            onConfirmOrder={handleConfirmOrder}
+            onConfirmOrder={handleConfirmOrderInline}
             onOpenNewOrderModal={handleOpenNewOrderModal}
             onReprocessAll={handleReprocessAll}
           />
@@ -283,35 +278,17 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'tablet' && (
-          <PostazioneTablet />
-        )}
-
-        {activeTab === 'admin' && (
-          <AdminRemoteHub />
-        )}
-
-        {activeTab === 'broadcast' && (
-          <BroadcastManager />
-        )}
-
-        {activeTab === 'connessione' && (
-          <ConnessioneBanco />
-        )}
-
-        {activeTab === 'statistiche' && (
-          <AnalisiStatistica
-            statistiche={statistiche}
-          />
-        )}
+        {activeTab === 'tablet' && <PostazioneTablet />}
+        {activeTab === 'admin' && <AdminRemoteHub />}
+        {activeTab === 'broadcast' && <BroadcastManager />}
+        {activeTab === 'connessione' && <ConnessioneBanco />}
+        {activeTab === 'statistiche' && <AnalisiStatistica statistiche={statistiche} />}
       </main>
 
-      {/* Footer */}
       <footer className="bg-petruzzi-100/90 border-t border-petruzzi-200 py-4 text-center text-xs text-petruzzi-800 font-medium">
         <p>Caseificio Petruzzi © {new Date().getFullYear()} — Sistema Event-Driven WhatsApp & IA Gemini Core</p>
       </footer>
 
-      {/* Add / Edit Order Modal */}
       <OrdiniModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -320,12 +297,9 @@ export default function App() {
         prodottiCatalogo={prodottiCatalogo}
       />
 
-      {/* Laboratory Print Modal / Printable View */}
       {isPrintModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white text-black rounded-2xl w-full max-w-4xl p-8 shadow-2xl print-container">
-            
-            {/* Header Print */}
             <div className="flex items-center justify-between border-b-2 border-black pb-4 mb-6">
               <div>
                 <h1 className="text-2xl font-black uppercase tracking-tight">Caseificio Petruzzi</h1>
@@ -337,7 +311,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Print Table */}
             <table className="w-full text-left print-table mb-6 border-collapse">
               <thead>
                 <tr className="bg-gray-100 border-b-2 border-black font-bold text-sm">
@@ -363,7 +336,6 @@ export default function App() {
               </tbody>
             </table>
 
-            {/* Footer Print Controls */}
             <div className="flex items-center justify-between pt-4 border-t border-gray-300 no-print">
               <button
                 onClick={() => setIsPrintModalOpen(false)}
@@ -379,11 +351,9 @@ export default function App() {
                 <span>Stampa Ora</span>
               </button>
             </div>
-
           </div>
         </div>
       )}
-
     </div>
   );
 }

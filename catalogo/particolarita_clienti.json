@@ -36,7 +36,74 @@
       "telefono": "",
       "ricotta_default": "RIC",
       "mozzarella_default": "FIOR DE LAT",
-      "particolarita": "Ordina solitamente prodotti Senza Lattosio (Delat)."
+      "particolarita": "Ordina solitamente prodotti Senza Lattosio (Delat). • [Note 2026-08-08]: Richiesta consegna per lunedì 2026-08-10. 5 coppie di silani corrispondono a 10 pezzi di Silano Petruzzi. • [Note 2026-08-08]: Consegna richiesta per lunedì (2026-08-10). Silani indicati in coppie (5 coppie = 10 pezzi). • [Note 2026-08-08]: Richiesti 5 coppie di silani (10 pezzi totali) • [Note 2026-08-08]: 5 coppie di silani (10 pezzi) • [Note 2026-08-08]: 5 coppie di silani (10 kg totali) • [Note 2026-08-08]: Consegna per lunedì. 5 coppie di silani (10 pezzi). • [Note 2026-08-08]: 5 coppie di silani (10 pezzi da 1kg ciascuno) • [Note 2026-08-08]: Consegna richiesta per lunedì.",
+      "ultimo_ordine": "2026-08-08 21:36:16",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 21:20:05",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"15 filoni 5 coppie di silani grazie. Buonasera, vi contatto, per favore, per la consegna di lunedì. Grazie e buona serata. Ca",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 15.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SILBIPE",
+              "quantita": 10.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 20:05:22",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"15 filoni 5 coppie di silani grazie\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 15.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SILBIPE",
+              "quantita": 10.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 20:04:23",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera, vi contatto, per favore, per la consegna di lunedì. Grazie e buona serata. Caseificio Petruzzi\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 15.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SILBIPE",
+              "quantita": 10.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 19:27:46",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera,  vi contatto, per favore, per la consegna di lunedì. Grazie e buona serata. Caseificio Petruzzi\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 15.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SILBIPE",
+              "quantita": 10.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
     },
     {
       "nome_cliente": "Pizzeria Plaza",
@@ -61,9 +128,41 @@
       "telefono": "",
       "ricotta_default": "",
       "mozzarella_default": "",
-      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08.",
-      "ultimo_ordine": "2026-08-08 16:03:19",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. • [Note 2026-08-08]: Conferma ordine precedente per lunedì 2026-08-10",
+      "ultimo_ordine": "2026-08-08 19:27:10",
       "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 19:27:10",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Grazie e buon weekend\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "STRACPE",
+              "quantita": 4.0,
+              "unita_di_misura": "kg",
+              "nome_articolo": "Stracciatella Petruzzi (Sfusa 1kg)"
+            },
+            {
+              "codice_articolo": "FDLBI0500PE",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "TAGJU0250PE",
+              "quantita": 1.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "CACBIPE",
+              "quantita": 2.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 12.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
         {
           "data": "2026-08-08 15:55:56",
           "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera per lunedi 4 kg stracciatella 3 kg vaschette da 500gr tritato 1 kg vaschette vaschette da 250gr tritato 1 coppia di",
@@ -103,9 +202,48 @@
       "telefono": "",
       "ricotta_default": "",
       "mozzarella_default": "",
-      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Richiesto canestrato (mappato a Caciocavallo Petruzzi)",
-      "ultimo_ordine": "2026-08-08 16:03:23",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Richiesto canestrato (mappato a Caciocavallo Petruzzi) • [Note 2026-08-08]: [Parser Locale di Riserva] mezzo kg di ricotta, 3 kg di bocconcini , 2 canestrato • [Note 2026-08-09]: Canestrato mappato a Caciocavallo Petruzzi • [Note 2026-08-09]: Canestrato mappato a Caciocavallo Petruzzi in pezzi come da storico cliente. • [Note 2026-08-09]: Canestrato mappato a Caciocavallo Petruzzi come da storico cliente.",
+      "ultimo_ordine": "2026-08-09 12:50:29",
       "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 22:09:46",
+          "messaggio_raw": "mezzo kg di ricotta, 3 kg di bocconcini , 2 canestrato",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "BOC0250PE",
+              "nome_articolo": "Bocconcini 0,250KG PETRUZZI",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "PECMO",
+              "nome_articolo": "PECORINO MOLITERNO",
+              "quantita": 2.0,
+              "unita_di_misura": "kg"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 20:19:05",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"mezzo kg di ricotta, 3 kg di bocconcini, 2 canestrato\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 0.5,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "BOC0250PE",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "CACBIPE",
+              "quantita": 2.0,
+              "unita_di_misura": "kg"
+            }
+          ]
+        },
         {
           "data": "2026-08-08 15:55:59",
           "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"mezzo kg di ricotta, 3 kg di bocconcini , 2 canestrato\"",
@@ -135,7 +273,7 @@
       "ricotta_default": "",
       "mozzarella_default": "",
       "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Ordine annullato dal cliente via WhatsApp.",
-      "ultimo_ordine": "2026-08-08 16:04:19",
+      "ultimo_ordine": "2026-08-09 12:51:05",
       "storico_ordini_esempi": [
         {
           "data": "2026-08-08 16:04:19",
@@ -149,8 +287,8 @@
       "telefono": "",
       "ricotta_default": "",
       "mozzarella_default": "",
-      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Richiesta fatturazione nel prossimo ordine come da accordi.",
-      "ultimo_ordine": "2026-08-08 16:33:10",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Richiesta fatturazione nel prossimo ordine come da accordi. • [Note 2026-08-09]: Richiesta fatturazione nella prossima volta come da accordi.",
+      "ultimo_ordine": "2026-08-09 10:54:20",
       "storico_ordini_esempi": [
         {
           "data": "2026-08-08 16:33:10",
@@ -160,6 +298,461 @@
               "codice_articolo": "FDLBI0500PE",
               "quantita": 1.0,
               "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Andrea Peteuzzi",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Cliente: Leo Marchese. Richiesto per martedì. • [Note 2026-08-08]: Cliente: Leo Marchese (Cacio a spicchi per martedì) + Maio N 3 petruzzelle per lunedì 2026-08-10 • [Note 2026-08-08]: Ordine comprensivo di Cacio a spicchi per martedì (Leo Marchese) e Petruzzelle per lunedì 2026-08-10 (Maio) • [Note 2026-08-08]: Ordine consolidato: Cacio a spicchi per martedì (Leo Marchese) e Petruzzelle per lunedì (Maio) • [Note 2026-08-08]: [Parser Locale di Riserva] Lunedì  Maio N 3 petruzzelle • [Note 2026-08-09]: Cacio a spicchi per martedì (Leo Marchese), Petruzzelle per lunedì (Maio) e Petruzzella per Conad Marsico • [Note 2026-08-09]: Per Conad Marsico • [Note 2026-08-09]: Conad Marsico N1 Petruzzella da kg",
+      "ultimo_ordine": "2026-08-09 12:49:57",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-09 10:14:24",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Conad Marsico N1 Petruzzella da kg\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "PETRZ0250PE",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 21:52:19",
+          "messaggio_raw": "Lunedì  Maio N 3 petruzzelle",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "PETRZ0250PE",
+              "nome_articolo": "Petruzzella 0,250KG PETRUZZI",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 21:19:53",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Per martedì, Leo Marchese, un cartone di Cacio a spicchi. Lunedì Maio N 3 petruzzelle. Lunedì Maio N 3 petruzzelle. Lunedì Ma",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "CACBIPV",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "PETRZ0250PE",
+              "quantita": 3.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 20:18:36",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Lunedì Maio N 3 petruzzelle\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "CACBIPV",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "PETRZ0250PE",
+              "quantita": 3.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 19:27:02",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Per martedì, Leo Marchese, un cartone di Cacio a spicchi\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "CACBIPV",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Giovanni Dolce Idea",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Conferma ordine per lunedì 10 agosto 2026. 3 filoni di mozzarella. • [Note 2026-08-08]: Consegna per lunedì 10 agosto 2026. Richiesti 3 filoni di mozzarella. • [Note 2026-08-08]: Consegna per lunedì 10 agosto 2026. 3 filoni di mozzarella. • [Note 2026-08-09]: Conferma ordine da storico precedente: 3 filoni di mozzarella. • [Note 2026-08-09]: Conferma ordine da storico: 3 filoni di mozzarella. • [Note 2026-08-09]: Conferma ordine per lunedì 10 agosto 2026: 3 filoni di mozzarella.",
+      "ultimo_ordine": "2026-08-09 12:50:13",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 20:05:30",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"X oggi 3 filoni grazie. Buonasera, vi contatto, per favore, per la consegna di lunedì. Grazie e buona serata. Caseificio Petr",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 19:27:42",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera, vi contatto, per favore, per la consegna di lunedì. Grazie e buona serata. Caseificio Petruzzi\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 3.0,
+              "unita_di_misura": "kg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Cocal Spinoso",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Consegna richiesta per lunedì 10 agosto 2026. • [Note 2026-08-08]: Consegna per lunedì 2026-08-10 • [Note 2026-08-08]: Consegna richiesta per lunedì 2026-08-10",
+      "ultimo_ordine": "2026-08-08 21:36:12",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 21:20:01",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera, 9 filoni e 1 hg di bocconcini. Buonasera, vi contatto, per favore, per la consegna di lunedì. Grazie e buona serat",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 9.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "BOC0250PE",
+              "quantita": 0.1,
+              "unita_di_misura": "kg"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 19:27:50",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera, vi contatto, per favore, per la consegna di lunedì. Grazie e buona serata. Caseificio Petruzzi\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FILMZPE",
+              "quantita": 9.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "BOC0250PE",
+              "quantita": 0.1,
+              "unita_di_misura": "kg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Vena Guardia Perticara",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08.",
+      "ultimo_ordine": "2026-08-09 12:55:27",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 19:28:18",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"È possibile anke mezzo kg di bufala\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "BUFAL",
+              "quantita": 0.5,
+              "unita_di_misura": "kg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Antonio Coinas",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Richiesti 2 cartoni salsiccia dolce, 1 cartone salsiccia piccante, 1 soppressata • [Note 2026-08-09]: Ordine ricevuto tramite messaggio WhatsApp",
+      "ultimo_ordine": "2026-08-09 10:51:15",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 19:59:02",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buongiorno n 2 cartoni salsiccia dolce n 1 cartone salsiccia piccante n 1 soppressata grazie\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "SALSD",
+              "quantita": 2.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SALSP",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SOPPRESS",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Giovanni Rosciano Rosciano",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Ordine annullato dal cliente via WhatsApp.",
+      "ultimo_ordine": "2026-08-09 10:54:44",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 20:40:25",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buongiorno consegna giovedì Ok scaliamo\"",
+          "traduzione_ia": []
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Maió Supermercato Antonio",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: Aggiunta di 2 burrate da 0,250kg ciascuna • [Note 2026-08-09]: Aggiunta di due burrate",
+      "ultimo_ordine": "2026-08-09 10:54:40",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-08 20:54:25",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Ti posso aggiungere due burrate\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "BURRA0250PE",
+              "quantita": 0.5,
+              "unita_di_misura": "kg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Donato Castello",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-08. Note: [Parser Locale di Riserva] Buonasera  Per domani  - 8 vaschette di mozzarelle da 250gr  - 6 vaschetta senza lattosio (1 da sostituire) - 4 scamorze - 2 manteche sottovuoto  - 1 scamorzine olive  - 2 caciocavalli  - 2 caciocavalli silani Grazie • [Note 2026-08-09]: Nota: 6 vaschette senza lattosio con 1 da sostituire.",
+      "ultimo_ordine": "2026-08-09 10:31:40",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-09 10:31:40",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera Per domani - 8 vaschette di mozzarelle da 250gr - 6 vaschetta senza lattosio (1 da sostituire) - 4 scamorze - 2 man",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FDLBI0250PE",
+              "quantita": 8.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "FIOR DE LAT",
+              "quantita": 6.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SCABIPC",
+              "quantita": 4.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "MANTEPC",
+              "quantita": 2.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SCAMOLI",
+              "quantita": 1.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "CACBIPE",
+              "quantita": 2.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "CACSDPE",
+              "quantita": 2.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-08 22:10:34",
+          "messaggio_raw": "Buonasera  Per domani  - 8 vaschette di mozzarelle da 250gr  - 6 vaschetta senza lattosio (1 da sostituire) - 4 scamorze - 2 manteche sottovuoto  - 1 ",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FIORDPE",
+              "nome_articolo": "Fior di latte PETRUZZI",
+              "quantita": 8.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "PANGRPE",
+              "nome_articolo": "Panna grezza non destinata al consumo diretto PETRUZZI",
+              "quantita": 250.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "SCA DELAT",
+              "nome_articolo": "Scamorza Delat",
+              "quantita": 4.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "MANTEPE",
+              "nome_articolo": "Manteca PETRUZZI",
+              "quantita": 2.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "SCAMBIA",
+              "nome_articolo": "Scamorzina bianca",
+              "quantita": 1.0,
+              "unita_di_misura": "pz"
+            },
+            {
+              "codice_articolo": "CACBIPE",
+              "nome_articolo": "Caciocavallo PETRUZZI",
+              "quantita": 2.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "CACBIPE",
+              "nome_articolo": "Caciocavallo PETRUZZI",
+              "quantita": 2.0,
+              "unita_di_misura": "kg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Marco Costantino 365 Sole",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-09. Note: Cliente 365 Sole. Stracciatella mappata su STRACPE (sfusa 1kg come da regola cliente). Ricotta mappata su RICOTPE.",
+      "ultimo_ordine": "2026-08-09 10:09:41",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-09 10:09:41",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buongiorno costantino per domani  3 stracciate 12 pz ricotta\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "STRA20250PE",
+              "quantita": 0.75,
+              "unita_di_misura": "kg",
+              "nome_articolo": "Stracciatella Petruzzi 0,250KG"
+            },
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 12.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Simona Maximall Sole365",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-09. Note: Ordine per Sole 365 di Pontecagnano. Scamorze indicate come 'senza lattosio' mappate sui prodotti standard conf. sottovuoto corrispondenti (bianche e affumicate). • [Note 2026-08-09]: Ordine per Sole 365 di Pontecagnano. Scamorze senza lattosio mappate sui prodotti standard conf. sottovuoto corrispondenti (bianche e affumicate).",
+      "ultimo_ordine": "2026-08-09 12:50:34",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-09 12:50:34",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera , questo è l ordine per il sole 365 di pontecagnano  8 pz    di ricotta     1 stracciatella      2 coppie di scamor",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 8.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "STRACPE",
+              "quantita": 1.0,
+              "unita_di_misura": "kg",
+              "nome_articolo": "Stracciatella Petruzzi (Sfusa 1kg)"
+            },
+            {
+              "codice_articolo": "SCABIPC",
+              "quantita": 4.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SCAAFPC",
+              "quantita": 4.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        },
+        {
+          "data": "2026-08-09 10:15:00",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera , questo è l ordine per il sole 365 di pontecagnano   8 pz    di ricotta     1 stracciatella      2 coppie di scamo",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "RICOTPE",
+              "quantita": 8.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "STRACPE",
+              "quantita": 1.0,
+              "unita_di_misura": "kg",
+              "nome_articolo": "Stracciatella Petruzzi (Sfusa 1kg)"
+            },
+            {
+              "codice_articolo": "SCABIPC",
+              "quantita": 4.0,
+              "unita_di_misura": "pezzi"
+            },
+            {
+              "codice_articolo": "SCAAFPC",
+              "quantita": 4.0,
+              "unita_di_misura": "pezzi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nome_cliente": "Narciso Sarconi",
+      "telefono": "",
+      "ricotta_default": "",
+      "mozzarella_default": "",
+      "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-09.",
+      "ultimo_ordine": "2026-08-09 12:51:01",
+      "storico_ordini_esempi": [
+        {
+          "data": "2026-08-09 10:15:28",
+          "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera! 9 kg mozzarella 2 stracciatella  Grazie\"",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "FIORDPE",
+              "quantita": 9.0,
+              "unita_di_misura": "kg"
+            },
+            {
+              "codice_articolo": "STRA20250PE",
+              "quantita": 0.5,
+              "unita_di_misura": "kg",
+              "nome_articolo": "Stracciatella Petruzzi 0,250KG"
             }
           ]
         }

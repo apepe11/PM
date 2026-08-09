@@ -8,81 +8,55 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 
-from dotenv import load_dotenv   # <-- nuovo import
+from dotenv import load_dotenv
 
-# Carica le variabili dal file .env
 load_dotenv()
 
-# Configurazione Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Leggi la chiave API da variabile d'ambiente (obbligatoria)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY non impostata. Creare un file .env con GEMINI_API_KEY=...")
 
-# Carica google.generativeai dinamicamente per evitare problemi di tipizzazione pyright/pylance
 _genai_module = importlib.import_module("google.generativeai")
 genai = cast(Any, _genai_module)
 if hasattr(genai, "configure"):
     genai.configure(api_key=GEMINI_API_KEY)
 
-# Lock e pacing rate-limiter per Gemini (max 15 RPM = 1 richiesta ogni 4 secondi)
 GEMINI_LOCK = asyncio.Lock()
 LAST_GEMINI_REQUEST_TIME = 0.0
 
 def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None) -> tuple[datetime, str]:
     """
-    Calcola la data di consegna target per la produzione.
-    REGOLA FERIALE: L'arco temporale per le consegne del giorno X va dalle 08:00 del giorno X-1 alle 08:00 del giorno X.
-    REGOLA WEEKEND: dal Sabato alle 08:00 al Lunedì alle 08:00, tutti gli ordini senza data sono destinati a LUNEDÌ.
+    Calcola la data di consegna target in base all'orario in cui il CLIENTE ha inviato il messaggio.
     """
     if ora_attuale is None:
         ora_attuale = datetime.now()
 
-    w = ora_attuale.weekday()  # 0=Lunedì, 1=Martedì, ..., 5=Sabato, 6=Domenica
     h = ora_attuale.hour
 
-    # 1. GESTIONE ECCEZIONE WEEKEND (Sabato 08:00 -> Lunedì 08:00 = Consegna Lunedì)
-    if (w == 5 and h >= 8) or w == 6 or (w == 0 and h < 8):
-        if w == 5:
-            days_ahead = 2
-        elif w == 6:
-            days_ahead = 1
-        else:
-            days_ahead = 0
-        data_target = ora_attuale + timedelta(days=days_ahead)
+    if h < 8:
+        data_target = ora_attuale
         desc = (
-            f"📅 ARCO TEMPORALE FINE SETTIMANA (Dal Sabato ore 08:00 al Lunedì ore 08:00).\n"
-            f"Se nel messaggio non è indicata una data espressa, l'ordine è destinato a LUNEDÌ ({data_target.strftime('%Y-%m-%d')}).\n"
-            f"Data di consegna di default: \"{data_target.strftime('%Y-%m-%d')}\"."
+            f"📅 REGOLE TEMPORALI (< 08:00):\n"
+            f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
+            f"Essendo arrivato prima delle 08:00, la data di consegna di default (se il cliente dice 'oggi') è lo stesso giorno: \"{data_target.strftime('%Y-%m-%d')}\"."
         )
-        
-    # 2. GESTIONE GIORNI FERIALI (Finestra esatta di 24 ore: 08:00 -> 08:00)
     else:
-        if h < 8:
-            days_ahead = 0  # Ordine arrivato prima delle 8:00 -> Produzione di OGGI
-        else:
-            days_ahead = 1  # Ordine arrivato dopo le 8:00 -> Produzione di DOMANI
-            
-        data_target = ora_attuale + timedelta(days=days_ahead)
+        data_target = ora_attuale + timedelta(days=1)
         desc = (
-            f"📅 REGOLA GENERALE CONSEGNA (Finestra 24h: dalle 08:00 alle 08:00):\n"
-            f"Se nel messaggio del cliente NON è indicata una data specifica, "
-            f"l'ordine è destinato TASSATIVAMENTE ALLA DATA PRECALCOLATA ({data_target.strftime('%Y-%m-%d')}).\n"
-            f"Data di consegna di default: \"{data_target.strftime('%Y-%m-%d')}\"."
+            f"📅 REGOLE TEMPORALI (>= 08:00):\n"
+            f"Il messaggio è stato inviato dal cliente in data {ora_attuale.strftime('%Y-%m-%d')} alle ore {ora_attuale.strftime('%H:%M:%S')}.\n"
+            f"Avendo superato le 08:00, l'ordine SLITTA AUTOMATICAMENTE al giorno dopo.\n"
+            f"Data di consegna di default (se il cliente dice 'per domani'): \"{data_target.strftime('%Y-%m-%d')}\"."
         )
 
     return data_target, desc
-
 class AIParser:
     def __init__(self, base_dir="catalogo"):
         self.base_dir = base_dir
-        
-        # 1. Carica il catalogo (Lista di oggetti)
         self.catalog = self._load_json(os.path.join(base_dir, "catalogo_prodotti.json"), [])
         
-        # 2. Carica i sinonimi e li trasforma in un dizionario veloce per il parser
         raw_synonyms = self._load_json(os.path.join(base_dir, "catalogo_sinonimi.json"), [])
         self.synonyms_map = {}
         for item in raw_synonyms:
@@ -90,11 +64,9 @@ class AIParser:
             if cod_art:
                 self.synonyms_map[cod_art] = item.get("sinonimi", "")
                 
-        # 3. Carica le regole clienti (Oggetto con array 'clienti')
         self.client_rules = self._load_json(os.path.join(base_dir, "particolarita_clienti.json"), {"clienti": []})
 
     def _load_json(self, file_path, default_value):
-        """Funzione sicura per caricare i JSON locali."""
         if os.path.exists(file_path):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -103,12 +75,9 @@ class AIParser:
                     return data
             except Exception as e:
                 logging.error(f"⚠️ Errore nel caricamento di {file_path}: {e}")
-        else:
-            logging.warning(f"⚠️ File non trovato: '{file_path}'. Verrà usato il valore di default.")
         return default_value
 
     def is_courtesy_or_non_order(self, text: str) -> bool:
-        """Filtra i messaggi di cortesia, saluti, conferme generiche, vocali/media o PDF per non sprecare token IA."""
         if not text:
             return True
         t_lower = text.lower().strip()
@@ -125,14 +94,13 @@ class AIParser:
             'a domani', 'domani', 'stasera', 'nulla', 'niente',
             'certamente', 'daccordo', 'd accordo', 'va bene', 'vabene', 'prego', 'buon lavoro',
             'buona giornata', 'buona serata', 'a dopo', 'a piu tardi', 'a più tardi',
-            'tutto ok', 'tutto bene', 'tutto a posto', 'a posto', 'aposto', 'tutto', 'tutta', 'tutti', 'tutte',
-            'ti', 'vi', 'per', 'la', 'il', 'lo', 'le', 'i', 'gli', 'di', 'del', 'della', 'd', 'dell', 'a', 'va', 'e', 'ed', 'o',
+            'tutto ok', 'tutto bene', 'tutto a posto', 'a posto', 'aposto',
             'disponibilita', 'disponibilità', 'risposta', 'cortesia', 'gentilezza',
             'saluti', 'cordiali', 'baci', 'abbracci'
         }
 
         tokens = re.sub(r'[^\w\s]', ' ', t_lower).split()
-        if not tokens: # Soltanto emoji o simboli (es. 👍, 🙏, 😊)
+        if not tokens: 
             return True
 
         if all(w in courtesy_words for w in tokens):
@@ -144,7 +112,6 @@ class AIParser:
         return False
 
     def get_specific_client_rules(self, client_name: str) -> str:
-        """Cerca il cliente nell'array 'clienti' ed estrae tutte le sue abitudini e lo storico."""
         client_name_lower = client_name.lower()
         lista_clienti = self.client_rules.get("clienti", [])
         
@@ -171,7 +138,7 @@ class AIParser:
                 return rule_text
         return ""
 
-    def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = ""):
+    def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = "", message_timestamp: Optional[datetime] = None):
         catalog_formatted = json.dumps(self.catalog, indent=2, ensure_ascii=False)
         sinonimi_formatted = json.dumps(self.synonyms_map, indent=2, ensure_ascii=False)
         
@@ -184,7 +151,7 @@ class AIParser:
 
         campioni_block = f"\nSTORICO CAMPIONI CONFERMATI PER IL CLIENTE '{client_name}':\n{campioni_passati_str}\n" if campioni_passati_str else ""
 
-        data_target, descrizione_slot = calcola_data_consegna_target()
+        data_target, descrizione_slot = calcola_data_consegna_target(message_timestamp)
         data_default_str = data_target.strftime('%Y-%m-%d')
 
         return f"""Sei l'assistente IA del Caseificio Petruzzi. 
@@ -192,17 +159,12 @@ class AIParser:
 
             REGOLE TASSATIVE PER L'ANALISI DELLA CONVERSAZIONE NELLA SUA INTEREZZA:
             1. ANALISI STORICO COMPLETO: Ti viene fornito lo "STORICO CONVERSAZIONE DI OGGI CON {client_name}" ed il "NUOVO MESSAGGIO". DEVI VALUTARE LA CONVERSAZIONE NELLA SUA INTEREZZA!
-            2. AGGIUNTE / INTEGRAZIONI: Se il cliente invia messaggi aggiuntivi (es. "aggiungi anche 2kg trecce"), DEVI SOMMARE o AGGIUNGERE i nuovi prodotti a quelli richiesti in precedenza nello storico.
-            3. CORREZIONI / SOSTITUZIONI: Se il cliente corregge un messaggio precedente (es. "no scusa anziché nodini volevo trecce", oppure "cambia la mozzarella da 5kg a 3kg"), DEVI APPLICARE LA MODIFICA/SOSTITUZIONE nel risultato finale!
-            4. ANNULLAMENTO DELL'ORDINE: Se il cliente richiede di annullare o cancellare l'ordine (es. "annulla l'ordine", "cancella tutto", "scusa per oggi non mi serve più nulla", "elimina l'ordine"), DEVI IMPOSTARE:
-               - "is_order": false
-               - "is_cancelled": true
-               - "prodotti": []
-               - "note_ordine": "Ordine annullato dal cliente via WhatsApp"
+            2. AGGIUNTE / INTEGRAZIONI: Se il cliente invia messaggi aggiuntivi (es. "aggiungi anche 2kg trecce"), DEVI SOMMARE o AGGIUNGERE i nuovi prodotti a quelli richiesti in precedenza.
+            3. CORREZIONI / SOSTITUZIONI: Se il cliente corregge un messaggio precedente (es. "cambia la mozzarella da 5kg a 3kg"), DEVI APPLICARE LA MODIFICA nel risultato finale.
+            4. ANNULLAMENTO DELL'ORDINE: Se il cliente richiede di annullare o cancellare l'ordine, imposta "is_cancelled": true e svuota l'array dei prodotti.
 
             REGOLE TASSATIVE DATA DI CONSEGNA:
-            1. SE NON SPECIFICATO -> GIORNO DOPO: Se nel messaggio del cliente NON è indicata espressamente un'altra data (es. "per oggi 8 agosto"), l'ordine è TASSATIVAMENTE DESTINATO AL GIORNO DOPO / PROSSIMO GIORNO DI CONSEGNA.
-            2. DATA DI DEFAULT DA USARE: "{data_default_str}". Assegna questa data a meno che il cliente non richieda in modo inequivocabile un'altra data nel testo.
+            1. SE NON SPECIFICATO -> CONSEGNA TASSATIVA: Usa la DATA DI DEFAULT: "{data_default_str}".
             {descrizione_slot}
 
             CATALOGO PRODOTTI UFFICIALE:
@@ -210,15 +172,16 @@ class AIParser:
             {regole_cliente}
             {campioni_block}
 
-            REGOLE DI MAPPATURA PRODOTTI:
-            1. Mappa i nomi colloquiali al codice esatto aiutandoti con i sinonimi.
-            2. STRACCIATELLA AD-HOC: Se il cliente è "Sole 365", la stracciatella generica DEVE ESSERE MAPPATA A "STRACPE" (sfusa 1kg). Per TUTTI GLI ALTRI clienti, DEVE ESSERE MAPPATA A "STRA20250PE" (vaschetta 0,250KG).
-            3. RICOTTA FRESCA + GIORNO PRIMA: Se nello stesso messaggio il cliente richiede sia ricotte fresche sia ricotte fredde / del giorno prima, DEVI SOMMARE le quantità totali del codice "RICOTPE" ed inserire la nota esplicativa nelle "note_ordine" (es. "5kg fresca + 5kg giorno prima").
-            4. Identifica la quantità espressa (es. 2 kg, 5 pezzi). Se non specificato, prodotti a peso fisso = "pezzi", resto = "kg".
+            REGOLE DI MAPPATURA E UNITA' DI MISURA (IMPORTANZA ESTREMA):
+            1. STRACCIATELLA AD-HOC: Se il cliente è "Sole 365", la stracciatella generica DEVE ESSERE "STRACPE" (sfusa 1kg). Altrimenti, DEVE ESSERE "STRA20250PE" (vaschetta 0,250KG).
+            2. UNITA' DI MISURA DA USARE:
+               - Se il cliente ordina PEZZI, NUMERI INTERI O COPPIE (es. "2 stracciatella", "15 filoni", "5 coppie di silani"), DEVI INSERIRE "unita_di_misura": "pezzi" e come "quantita" il numero di pezzi (NB: 1 coppia = 2 pezzi, quindi 5 coppie = 10 pezzi).
+               - Se il cliente ordina CHILI o GRAMMI (es. "2 kg di stracciatella", "1 hg di bocconcini"), DEVI INSERIRE "unita_di_misura": "kg" e convertire i grammi in kg (es. 1 hg = 0.1 kg).
+               - NON ESEGUIRE TU IL CALCOLO MATEMATICO DEI PEZZI IN CHILI. Assegna semplicemente i "pezzi", Python lo farà per te!
 
             RISPONDI ESCLUSIVAMENTE CON UN OGGETTO JSON PURO SENZA FORMATTAZIONI MARKDOWN (NO ```json):
             {{
-            "testo_trascritto": "trascrizione testuale integrale in italiano (se presente messaggio vocale)",
+            "testo_trascritto": "trascrizione testuale integrale in italiano",
             "is_order": true/false,
             "is_cancelled": true/false,
             "data_consegna": "YYYY-MM-DD",
@@ -233,7 +196,7 @@ class AIParser:
             "da_verificare_manualmente": false
             }}"""
 
-    async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg"):
+    async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg", message_timestamp: Optional[datetime] = None):
         global LAST_GEMINI_REQUEST_TIME
 
         if not audio_data and self.is_courtesy_or_non_order(text_to_parse):
@@ -256,78 +219,98 @@ class AIParser:
             async with GEMINI_LOCK:
                 now = time.time()
                 elapsed = now - LAST_GEMINI_REQUEST_TIME
-                min_pacing = 4.0  # Garantisce max 15 richieste/minuto per non superare il rate limit Gemini
+                min_pacing = 4.0
                 if elapsed < min_pacing:
                     wait_time = min_pacing - elapsed
                     logging.info(f"⏳ Spaziatura rate-limit Gemini ({wait_time:.1f}s)...")
                     await asyncio.sleep(wait_time)
-
                 LAST_GEMINI_REQUEST_TIME = time.time()
 
-                try:
-                    prompt_sistema = self.build_system_instruction(client_name, campioni_str)
-                    
-                    model = genai.GenerativeModel( 
-                        model_name='gemini-flash-lite-latest',
-                        system_instruction=prompt_sistema
-                    )
-                    
-                    if storico_oggi:
-                        prompt_utente = f"STORICO CONVERSAZIONE DI OGGI CON {client_name}:\n{storico_oggi}\n\nNUOVO MESSAGGIO DI CORREZIONE/AGGIUNTA:\n\"{text_to_parse}\""
-                    else:
-                        prompt_utente = f"Messaggio ricevuto da {client_name}:\n\"{text_to_parse}\""
-                    
-                    if audio_data:
-                        prompt_utente += "\n(Ascolta l'audio allegato ed estrai i prodotti ordinati dal cliente)"
-                        contents = [
-                            prompt_utente,
-                            {
-                                "mime_type": mime_type,
-                                "data": audio_data
-                            }
-                        ]
-                    else:
-                        contents = prompt_utente
+            try:
+                prompt_sistema = self.build_system_instruction(client_name, campioni_str, message_timestamp)
+                
+                model = genai.GenerativeModel( 
+                    model_name='gemini-flash-lite-latest',
+                    system_instruction=prompt_sistema
+                )
+                
+                if storico_oggi:
+                    prompt_utente = f"STORICO CONVERSAZIONE DI OGGI CON {client_name}:\n{storico_oggi}\n\nNUOVO MESSAGGIO DI CORREZIONE/AGGIUNTA:\n\"{text_to_parse}\""
+                else:
+                    prompt_utente = f"Messaggio ricevuto da {client_name}:\n\"{text_to_parse}\""
+                
+                if audio_data:
+                    prompt_utente += "\n(Ascolta l'audio allegato ed estrai i prodotti ordinati dal cliente)"
+                    contents = [
+                        prompt_utente,
+                        {
+                            "mime_type": mime_type,
+                            "data": audio_data
+                        }
+                    ]
+                else:
+                    contents = prompt_utente
 
-                    response = await model.generate_content_async(
-                        contents,
-                        generation_config={"temperature": 0.0, "response_mime_type": "application/json"}
-                    )
-                    
-                    raw_text = response.text.strip()
-                    parsed_json = json.loads(raw_text)
-                    parsed_json["cliente_id"] = client_name
+                response = await model.generate_content_async(
+                    contents,
+                    generation_config={"temperature": 0.0, "response_mime_type": "application/json"}
+                )
+                
+                raw_text = response.text.strip()
+                parsed_json = json.loads(raw_text)
+                parsed_json["cliente_id"] = client_name
 
-                    is_sole_365 = "sole 365" in client_name.lower() or "sole365" in client_name.lower()
-                    prodotti_parsed = parsed_json.get("prodotti", [])
-                    for p in prodotti_parsed:
-                        cod = p.get("codice_articolo", "")
-                        nome = (p.get("nome_articolo") or "").lower()
-                        if "stracciatella" in nome or cod in ["STRACPE", "STRA20250PE"]:
-                            if is_sole_365:
-                                p["codice_articolo"] = "STRACPE"
-                                p["nome_articolo"] = "Stracciatella Petruzzi (Sfusa 1kg)"
-                            else:
-                                p["codice_articolo"] = "STRA20250PE"
-                                p["nome_articolo"] = "Stracciatella Petruzzi 0,250KG"
+                is_sole_365 = "sole 365" in client_name.lower() or "sole365" in client_name.lower()
+                prodotti_parsed = parsed_json.get("prodotti", [])
+                for p in prodotti_parsed:
+                    cod = p.get("codice_articolo", "")
+                    nome = (p.get("nome_articolo") or "").lower()
+                    qta = float(p.get("quantita", 1.0))
+                    um = p.get("unita_di_misura", "kg").lower()
 
-                    return parsed_json
+                    if "stracciatella" in nome or cod in ["STRACPE", "STRA20250PE"]:
+                        if is_sole_365:
+                            p["codice_articolo"] = "STRACPE"
+                            p["nome_articolo"] = "Stracciatella Petruzzi (Sfusa 1kg)"
+                            nome = "Stracciatella Petruzzi (Sfusa 1kg)".lower()
+                        else:
+                            p["codice_articolo"] = "STRA20250PE"
+                            p["nome_articolo"] = "Stracciatella Petruzzi 0,250KG"
+                            nome = "Stracciatella Petruzzi 0,250KG".lower()
 
-                except Exception as e:
-                    err_str = str(e)
-                    if "429" in err_str or "quota" in err_str.lower() or "resourceexhausted" in err_str.lower():
-                        if attempt == 0:
-                            logging.warning("⚠️ Quota Gemini temporanea. Pausa di 4s prima di riprovare con l'IA...")
-                            await asyncio.sleep(4.0)
-                            continue
-                    
-                    logging.error(f"❌ Errore IA: {e}. Attivazione Parser Locale di riserva.")
-                    return self.fallback_local_parse(text_to_parse, client_name)
+                    import re
+                    match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', nome.replace(',', '.'))
+                    peso_unitario = float(match_kg.group(1)) if match_kg else 0.0
 
-        return self.fallback_local_parse(text_to_parse, client_name)
+                    if peso_unitario > 0 and um in ["pezzi", "pz", "vaschette", "unità"]:
+                        p["quantita"] = round(qta * peso_unitario, 3)
+                        p["unita_di_misura"] = "kg"
 
-    def fallback_local_parse(self, text_to_parse: str, client_name: str) -> dict:
-        """Parser deterministico locale basato sul catalogo e sinonimi se l'API IA fallisce o quota superata."""
+                return parsed_json
+
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "quota" in err_str.lower() or "resourceexhausted" in err_str.lower():
+                    if attempt == 0:
+                        logging.warning("⚠️ Quota Gemini temporanea. Pausa di 4s prima di riprovare con l'IA...")
+                        await asyncio.sleep(4.0)
+                        continue
+                
+                logging.error(f"❌ Errore IA: {e}. Attivazione Parser Locale di riserva.")
+                return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
+
+        return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
+
+    def fallback_local_parse(self, text_to_parse: str, client_name: str, message_timestamp: Optional[datetime] = None) -> dict:
+        # Scarta subito se il testo è dominato da cifre tipiche di telefono/orario
+        testo_pulito_cifre = re.sub(r'[\s\-\.\(\)\+:]', '', text_to_parse)
+        if testo_pulito_cifre.isdigit() and len(testo_pulito_cifre) >= 6:
+            return {
+                "is_order": False, "is_cancelled": False, "cliente_id": client_name,
+                "prodotti": [], "note_ordine": "[Parser Locale] Testo scartato: sembra un numero/orario.",
+                "da_verificare_manualmente": True
+            }
+
         prodotti_trovati = []
         raw_synonyms = self._load_json(os.path.join(self.base_dir, "catalogo_sinonimi.json"), [])
         
@@ -346,6 +329,10 @@ class AIParser:
                 qta = float(qta_str.replace(',', '.'))
             except ValueError:
                 qta = 1.0
+
+            # Scarta quantità implausibili (probabile falso positivo, es. orario "14:30" letto come "14")
+            if qta <= 0 or qta > 500:
+                continue
 
             p_clean = prod_raw.strip().lower()
             matched_entry = None
@@ -366,8 +353,7 @@ class AIParser:
                     "unita_di_misura": matched_entry["um"]
                 })
 
-        data_target, _ = calcola_data_consegna_target()
-
+        data_target, _ = calcola_data_consegna_target(message_timestamp)
         is_canc = bool(re.search(r'\b(?:annulla|cancella|disdici|elimina|non portarmi|non mi serve)\b', text_to_parse, re.IGNORECASE))
 
         return {

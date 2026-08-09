@@ -98,14 +98,12 @@ export default function ProduzioneGiornaliera({ produzione, selectedDate, setSel
                 <th className="py-4 px-6">Formato / Prodotto</th>
                 <th className="py-4 px-6 text-right">Quantità Totale da Produrre</th>
                 <th className="py-4 px-6 text-center">Unità</th>
-                <th className="py-4 px-6 text-center">Ordini Totali</th>
-                <th className="py-4 px-6 text-center">Stato</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-petruzzi-200/80 text-sm">
               {filteredProduzione.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="text-center py-12 text-petruzzi-600 font-medium">
+                  <td colSpan="5" className="text-center py-12 text-petruzzi-600 font-medium">
                     Nessun prodotto da lavorare per la data selezionata.
                   </td>
                 </tr>
@@ -151,18 +149,7 @@ export default function ProduzioneGiornaliera({ produzione, selectedDate, setSel
                         </span>
                       </td>
 
-                      {/* N. Ordini */}
-                      <td className="py-4 px-6 text-center text-petruzzi-800 font-bold">
-                        {item.numero_ordini} {item.numero_ordini === 1 ? 'cliente' : 'clienti'}
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-4 px-6 text-center">
-                        <span className="inline-flex items-center space-x-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-3 py-1 rounded-full">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                          <span>In Produzione</span>
-                        </span>
-                      </td>
+                      
                     </tr>
                   );
                 })

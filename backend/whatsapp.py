@@ -13,9 +13,9 @@ from backend.ai_parser import AIParser
 SESSION_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "whatsapp_session"))
 ai_parser = AIParser(base_dir="catalogo")
 messaggi_processati = set()
+BROADCAST_DEMONE_ATTIVO = False
 
 def calcola_timestamp_ricezione_reale(time_str: Optional[str] = None, data_ricezione_str: Optional[str] = None) -> str:
-    """Calcola la vera data e ora di arrivo del messaggio WhatsApp in formato YYYY-MM-DD HH:MM:SS."""
     now = datetime.now()
     target_date = now.date()
 
@@ -42,13 +42,18 @@ def calcola_timestamp_ricezione_reale(time_str: Optional[str] = None, data_ricez
             hh, mm = int(matches.group(1)), int(matches.group(2))
             if not data_ricezione_str and hh > now.hour + 2:
                 target_date = now.date() - timedelta(days=1)
-            time_part = f"{hh:02d}:{mm:02d}:00"
+            
+            # SE il messaggio è arrivato adesso, prendiamo l'orario reale del PC (inclusi i secondi)
+            if target_date == now.date() and hh == now.hour and mm == now.minute:
+                time_part = f"{hh:02d}:{mm:02d}:{now.second:02d}"
+            else:
+                time_part = f"{hh:02d}:{mm:02d}:00"
 
     return f"{target_date.strftime('%Y-%m-%d')} {time_part}"
 
-# Global Connection & Event State
+
 WHATSAPP_STATE = {
-    "stato_connessione": "DISCONNESSO", # DISCONNESSO, IN_ATTESA_QR, CONNESSO, ERRORE
+    "stato_connessione": "DISCONNESSO", 
     "qr_code_base64": None,
     "account_banco": None,
     "data_connessione": None,
@@ -78,43 +83,49 @@ def get_whatsapp_status():
     return WHATSAPP_STATE
 
 async def estrai_audio_da_chat(page, mittente, row_index=None) -> Optional[dict[str, str]]:
-    """Apre la chat del mittente ed estrae l'audio dell'ultimo messaggio vocale ricevuto."""
     try:
         if page.is_closed():
             return None
 
         opened = False
-        # 1. Tenta il click diretto tramite row_index se fornito
-        if row_index is not None:
+        clean_mittente = mittente.split('(')[0].strip() if mittente else ""
+        
+        # 🎯 TENTATIVO 1: LA BARRA DI RICERCA (Infallibile contro il DOM dinamico)
+        if clean_mittente:
+            search_box = page.locator('div[contenteditable="true"][data-tab="3"], div[title*="ricerca"]')
+            if await search_box.count() > 0:
+                await search_box.first.fill(clean_mittente)
+                await asyncio.sleep(1.5) # Attendi i risultati
+                
+                chat_result = page.locator('div#pane-side div[role="row"]').first
+                if await chat_result.count() > 0:
+                    await chat_result.click(force=True)
+                    opened = True
+                    await asyncio.sleep(1.0)
+                
+                # Pulisci la barra di ricerca per ripristinare la lista
+                clear_btn = page.locator('button[aria-label*="Annulla"]')
+                if await clear_btn.count() > 0:
+                    await clear_btn.first.click(force=True)
+                else:
+                    await search_box.first.fill("")
+                await asyncio.sleep(0.5)
+
+        # 🔄 TENTATIVO 2: Scroll vecchia maniera (Fall-back se la ricerca fallisce)
+        if not opened and row_index is not None:
             try:
                 rows = page.locator('div#pane-side div[role="row"]')
                 if await rows.count() > row_index:
                     await rows.nth(row_index).scroll_into_view_if_needed()
-                    # AGGIUNTO force=True PER SUPERARE IL BLOCCO DEL CLICK
                     await rows.nth(row_index).click(force=True)
                     opened = True
             except Exception:
-                opened = False
-
-        # 2. Se non aperto, cerca la chat tramite mittente esatto o parziale
-        if not opened and mittente:
-            clean_mittente = mittente.split()[0] if mittente and len(mittente.split()) > 0 else mittente
-            chat_row = page.locator('div#pane-side div[role="row"]').filter(has=page.locator('span[title]', has_text=mittente))
-            if await chat_row.count() == 0 and clean_mittente:
-                chat_row = page.locator('div#pane-side div[role="row"]').filter(has_text=clean_mittente)
-
-            if await chat_row.count() > 0:
-                await chat_row.first.scroll_into_view_if_needed()
-                # AGGIUNTO force=True PER SUPERARE IL BLOCCO DEL CLICK
-                await chat_row.first.click(force=True)
-                opened = True
+                pass
 
         if opened:
-            # Aumentato il timeout di sicurezza per il caricamento della chat
             await page.wait_for_selector("div#main", timeout=8000)
             await asyncio.sleep(1.0)
 
-            # Aumentati i tentativi e i tempi di attesa
             for attempt in range(10):
                 if page.is_closed():
                     return None
@@ -123,55 +134,30 @@ async def estrai_audio_da_chat(page, mittente, row_index=None) -> Optional[dict[
                 audio_info = await page.evaluate(r'''async () => {
                     const main = document.querySelector('div#main');
                     if (!main) return null;
-
-                    // Cerca in tutti i messaggi recenti e raccoglie debug dettagliato
                     const messages = main.querySelectorAll('div[data-id], div.message-in, div._1wlJG');
 
                     for (let i = messages.length - 1; i >= 0; i--) {
                         const msg = messages[i];
-
-                        // Ignora i messaggi inviati dal banco (outgoing)
                         if (msg.classList && msg.classList.contains && msg.classList.contains('message-out')) continue;
 
-                        // Debug object per questa iterazione
-                        const debug = { hasAudioTag: false, audioSrc: null, currentSrc: null, buttonsFound: 0, fetchError: null, outerPreview: (msg.outerHTML||'').slice(0,300) };
-
+                        const debug = { hasAudioTag: false, audioSrc: null, currentSrc: null, buttonsFound: 0, fetchError: null };
                         let audioEl = msg.querySelector('audio');
 
-                        if (audioEl) {
-                            debug.hasAudioTag = true;
-                            debug.audioSrc = audioEl.src || null;
-                            debug.currentSrc = audioEl.currentSrc || null;
-                        }
-
-                        // Cerca bottoni e icone candidate
-                        const candidates = Array.from(msg.querySelectorAll('button, span, a')).filter(e => {
-                            const aria = (e.getAttribute && (e.getAttribute('aria-label') || '')).toLowerCase();
-                            const dataIcon = (e.getAttribute && (e.getAttribute('data-icon') || '')).toLowerCase();
-                            return aria.includes('vocale') || aria.includes('play') || aria.includes('riproduci') || aria.includes('scarica') || dataIcon.includes('ptt') || dataIcon.includes('play') || dataIcon.includes('audio') || (e.innerText||'').toLowerCase().includes('play');
+                        const candidates = Array.from(msg.querySelectorAll('button, span, a, div[role="button"], div[data-icon]')).filter(e => {
+                            const aria = (e.getAttribute('aria-label') || '').toLowerCase();
+                            const dataIcon = (e.getAttribute('data-icon') || '').toLowerCase();
+                            return aria.includes('vocale') || aria.includes('play') || aria.includes('riproduci') || aria.includes('scarica') || aria.includes('download') || dataIcon.includes('ptt') || dataIcon.includes('play') || dataIcon.includes('audio');
                         });
                         debug.buttonsFound = candidates.length;
 
-                        // Prova a cliccare il primo candidato per forzare il caricamento
                         if ((!audioEl || !audioEl.src || audioEl.src.startsWith('about:')) && candidates.length > 0) {
                             try { candidates[0].click(); await new Promise(r => setTimeout(r, 900)); } catch(e) {}
                             audioEl = msg.querySelector('audio');
-                            if (audioEl) {
-                                debug.hasAudioTag = true;
-                                debug.audioSrc = audioEl.src || null;
-                                debug.currentSrc = audioEl.currentSrc || null;
-                            }
                         }
 
-                        // Se ancora nulla, prova a cliccare la bubble del messaggio
                         if (!audioEl || (!audioEl.src && !audioEl.currentSrc)) {
-                            try { msg.click(); await new Promise(r => setTimeout(r, 600)); } catch(e) {}
+                            try { msg.click(); await new Promise(r => setTimeout(r, 800)); } catch(e) {}
                             audioEl = msg.querySelector('audio');
-                            if (audioEl) {
-                                debug.hasAudioTag = true;
-                                debug.audioSrc = audioEl.src || null;
-                                debug.currentSrc = audioEl.currentSrc || null;
-                            }
                         }
 
                         if (audioEl && (audioEl.currentSrc || audioEl.src)) {
@@ -194,7 +180,6 @@ async def estrai_audio_da_chat(page, mittente, row_index=None) -> Optional[dict[
                                 return { debug };
                             }
                         }
-                        // Se non abbiamo audio per questo messaggio, ritornare il debug parziale per diagnostica
                         return { debug };
                     }
                     return null;
@@ -208,6 +193,7 @@ async def estrai_audio_da_chat(page, mittente, row_index=None) -> Optional[dict[
         print(f"⚠️ Impossibile scaricare l'audio per {mittente}: {e}")
     return None
 
+    
 async def elabora_nuovo_messaggio(args, page=None):
     mittente = args.get('mittente', 'Sconosciuto')
     testo = args.get('testo', '')
@@ -216,17 +202,30 @@ async def elabora_nuovo_messaggio(args, page=None):
     time_str = args.get('time_str')
     data_ricezione = args.get('data_ricezione')
     
-    # Controllo di sicurezza: ignora messaggi inviati dal Banco stesso
     if mittente.strip().lower() in ["tu", "you", "banco", "me", "io"]:
         return
 
+    # 1. CALCOLA IL TIMESTAMP ESATTO SUBITO (AL MILLISECONDO)
+    data_ricezione_custom = calcola_timestamp_ricezione_reale(time_str, data_ricezione)
+    try:
+        dt_msg = datetime.strptime(data_ricezione_custom, '%Y-%m-%d %H:%M:%S')
+    except:
+        dt_msg = datetime.now()
+
+    data_id = args.get('data_id', '')
     metadata = {
         "mittente": mittente,
         "is_vocal": is_vocal,
         "row_index": row_index,
         "time_str": time_str,
+        "data_id": data_id,
         "data_ricezione": data_ricezione
     }
+    if data_id:
+        add_whatsapp_log(f"🔑 [DEDUPLICA] Rilevato DOM data-id per {mittente}: '{data_id}'", "INFO")
+    else:
+        add_whatsapp_log(f"🔑 [DEDUPLICA] DOM data-id non presente per {mittente}, impiegata chiave fallback.", "INFO")
+
     msg_summary = f"Da {mittente}: {testo[:40]}..." if len(testo) > 40 else f"Da {mittente}: {testo}"
     if is_vocal:
         add_whatsapp_log(f"🎙️ [VOCALE AUTOMATICO] Ricevuto audio da {mittente} -> Avvio immediato trascrizione IA...", "AUDIO", metadata=metadata)
@@ -249,14 +248,12 @@ async def elabora_nuovo_messaggio(args, page=None):
                 metadata={**metadata, "audio_extracted": True}
             )
         else:
-            # Se abbiamo info di debug ritornate dalla pagina, includile nel log
             debug_info = None
             try:
                 if isinstance(audio_info, dict) and audio_info.get('debug'):
                     debug_info = audio_info.get('debug')
             except Exception:
-                debug_info = None
-
+                pass
             add_whatsapp_log(
                 f"⚠️ Estrazione file audio per {mittente} fallita o non disponibile. Tenta analisi del testo.",
                 "WARN",
@@ -265,12 +262,14 @@ async def elabora_nuovo_messaggio(args, page=None):
 
     storico_di_oggi = await get_storico_oggi(mittente)
     
+    # 2. PASSIAMO L'ORARIO REALE DEL MESSAGGIO A GEMINI!
     risultato_ia = await ai_parser.parse_message(
         testo,
         client_name=mittente,
         storico_oggi=storico_di_oggi,
         audio_data=audio_data,
-        mime_type=mime_type
+        mime_type=mime_type,
+        message_timestamp=dt_msg
     )
     if risultato_ia is None:
         risultato_ia = {
@@ -279,10 +278,18 @@ async def elabora_nuovo_messaggio(args, page=None):
             "note_ordine": "Errore durante l'analisi IA.",
             "da_verificare_manualmente": True
         }
+        
+    risultato_ia["timestamp_elaborazione"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    is_order = risultato_ia.get("is_order", False)
-    is_cancelled = risultato_ia.get("is_cancelled", False)
+    # Estraiamo i dati
     prodotti = risultato_ia.get("prodotti", [])
+    is_cancelled = risultato_ia.get("is_cancelled", False)
+
+    # 🛑 REGOLA DI FERRO: Se l'array prodotti è vuoto (0 voci) e non è un annullamento, NON E' UN ORDINE!
+    if len(prodotti) == 0 and not is_cancelled:
+        risultato_ia["is_order"] = False
+        
+    is_order = risultato_ia.get("is_order", False)
     
     trascrizione = risultato_ia.get("testo_trascritto")
     if trascrizione:
@@ -292,8 +299,6 @@ async def elabora_nuovo_messaggio(args, page=None):
         testo_db = f"🎙️ [MESSAGGIO VOCALE] {testo}"
     else:
         testo_db = testo
-
-    data_ricezione_custom = calcola_timestamp_ricezione_reale(time_str, data_ricezione)
 
     if is_cancelled or (storico_di_oggi and not is_order and len(prodotti) == 0 and ("annull" in testo.lower() or "cancell" in testo.lower() or "disdic" in testo.lower() or "non serve" in testo.lower())):
         add_whatsapp_log(f"🚫 Ordine per {mittente} ANNULLATO via WhatsApp su richiesta del cliente.", "WARN")
@@ -309,9 +314,8 @@ async def elabora_nuovo_messaggio(args, page=None):
         await salva_o_aggiorna_ordine(mittente, testo_db, json.dumps(risultato_ia, ensure_ascii=False), data_ricezione_custom=data_ricezione_custom)
     else:
         add_whatsapp_log(f"ℹ️ Messaggio informativo/cortesia da {mittente}", "INFO")
-
 async def estrai_chat_visibili(page):
-    """Funzione di appoggio per estrarre le chat a schermo (filtrando le risposte del banco e rilevando i vocali)."""
+    """Funzione di appoggio per estrarre le chat a schermo (filtrando i messaggi vecchi)."""
     return await page.evaluate(r'''() => {
         const risultati = [];
         const rows = document.querySelectorAll('div#pane-side div[role="row"]');
@@ -319,6 +323,17 @@ async def estrai_chat_visibili(page):
         rows.forEach((row, index) => {
             const innerHTML = row.innerHTML;
             const innerText = row.innerText || '';
+            
+            const timeEl = row.querySelector('div._ak8i, span[dir="auto"]:last-of-type');
+            let timeStr = '';
+            if (timeEl) {
+                const t = (timeEl.innerText || '').toLowerCase().trim();
+                if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(t) || /^(lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica)$/.test(t)) {
+                    return; 
+                }
+                const matches = t.match(/\b\d{1,2}:\d{2}\b/);
+                if (matches) timeStr = matches[0];
+            }
 
             let mittente = '';
             const titleEl = row.querySelector('span[title]');
@@ -355,7 +370,6 @@ async def estrai_chat_visibili(page):
             const haBozza = /^\s*Bozza\s*:/im.test(innerText) || /\n\s*Bozza\s*:/i.test(innerText);
             const haTailOut = /tail-out|message-out/i.test(innerHTML);
 
-            // SCARTA TASSATIVAMENTE I MESSAGGI INVIATI DAL BANCO (OUTGOING)
             if (haSpuntaIcona || haSpuntaTesto || haTuPrefix || haBozza || haTailOut) {
                 return;
             }
@@ -368,6 +382,10 @@ async def estrai_chat_visibili(page):
                     testo = val;
                     break;
                 }
+            }
+
+            if (testo) {
+                testo = testo.replace(/^Inoltrato\s*/i, '').replace(/Inoltrato/i, '').trim();
             }
 
             if (/sta\s+scrivendo|sta\s+registrando|sta\s+digitando|online/i.test(testo) || /sta\s+scrivendo|sta\s+registrando|sta\s+digitando|online/i.test(innerText)) {
@@ -387,12 +405,7 @@ async def estrai_chat_visibili(page):
             const unreadEl = row.querySelector('span[aria-label*="non lett"], span[aria-label*="unread"], [data-icon="unread-count"], span._1pj2u, span[aria-label*="messagg"]');
             const isUnread = !!unreadEl;
 
-            let timeStr = '';
-            const timeEl = row.querySelector('div._ak8i, span[dir="auto"]');
-            if (timeEl) {
-                const matches = (timeEl.innerText || '').match(/\b\d{1,2}:\d{2}\b/);
-                if (matches) timeStr = matches[0];
-            }
+            const dataId = row.getAttribute('data-id') || row.querySelector('[data-id]')?.getAttribute('data-id') || '';
 
             risultati.push({
                 mittente: mittente,
@@ -400,14 +413,14 @@ async def estrai_chat_visibili(page):
                 is_vocal: isVocal,
                 is_unread: isUnread,
                 row_index: index,
-                time_str: timeStr
+                time_str: timeStr,
+                data_id: dataId
             });
         });
         return risultati;
     }''')
 
 async def forzare_scansione_chat():
-    """Consente di forzare la scansione immediata delle chat visibili e processare tutti gli ordini pendenti o ricevuti."""
     global CURRENT_PAGE, messaggi_processati
     if not CURRENT_PAGE or CURRENT_PAGE.is_closed():
         return {"status": "error", "message": "WhatsApp non è attualmente connesso."}
@@ -417,26 +430,24 @@ async def forzare_scansione_chat():
         dati_chat.sort(key=lambda m: m.get('row_index', 0))
         n_processati = 0
         for msg in dati_chat:
-            chiave_univoca = f"{msg['mittente']}_{msg['testo']}_{msg.get('time_str', '')}"
+            chiave_univoca = f"{msg.get('data_id') or ''}_{msg['mittente']}_{msg['testo']}_{msg.get('time_str', '')}"
             already_in_db = await ordine_esiste_in_db(msg['mittente'], msg['testo'], msg.get('time_str'))
             if (chiave_univoca not in messaggi_processati or msg.get('is_unread')) or not already_in_db:
                 messaggi_processati.add(chiave_univoca)
-                await elabora_nuovo_messaggio(msg, CURRENT_PAGE)
+                asyncio.create_task(elabora_nuovo_messaggio(msg, CURRENT_PAGE))
                 n_processati += 1
-                await asyncio.sleep(1.5)
-        return {"status": "ok", "message": f"Scansione completata. Processati {n_processati} ordini/messaggi."}
+                await asyncio.sleep(0.1) 
+        return {"status": "ok", "message": f"Scansione completata. Processati {n_processati} ordini/messaggi in background."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 async def disconnetti_whatsapp():
-    """Chiude il browser Playwright e resetta la sessione."""
     global CURRENT_PAGE, BROWSER_CONTEXT, PLAYWRIGHT_INSTANCE
     add_whatsapp_log("🔌 Chiusura e disconnessione in corso...", "WARN")
     WHATSAPP_STATE["stato_connessione"] = "DISCONNESSO"
     WHATSAPP_STATE["qr_code_base64"] = None
     WHATSAPP_STATE["account_banco"] = None
     
-    # Azzera subito CURRENT_PAGE per segnalare l'interruzione ai loop in ascolto
     CURRENT_PAGE = None
 
     try:
@@ -444,13 +455,13 @@ async def disconnetti_whatsapp():
             try:
                 await BROWSER_CONTEXT.close()
             except Exception as e:
-                print(f"Avviso chiusura context: {e}")
+                pass
             BROWSER_CONTEXT = None
         if PLAYWRIGHT_INSTANCE:
             try:
                 await PLAYWRIGHT_INSTANCE.stop()
             except Exception as e:
-                print(f"Avviso stop playwright: {e}")
+                pass
             PLAYWRIGHT_INSTANCE = None
         add_whatsapp_log("🛑 Sessione disconnessa con successo.", "INFO")
         return True
@@ -459,17 +470,14 @@ async def disconnetti_whatsapp():
         return False
 
 async def reset_whatsapp_banco():
-    """Dimentica il dispositivo Banco attuale, elimina i file di autenticazione e riavvia la procedura da zero."""
-    global CURRENT_PAGE, BROWSER_CONTEXT, PLAYWRIGHT_INSTANCE, messaggi_processati
+    global CURRENT_PAGE, BROWSER_CONTEXT, PLAYWRIGHT_INSTANCE, messaggi_processati, BROADCAST_DEMONE_ATTIVO
+    BROADCAST_DEMONE_ATTIVO = False
     
     try:
         add_whatsapp_log("🗑️ Dimentico dispositivo Banco corrente e resetto credenziali...", "WARN")
-        
-        # 1. Chiude e disconnette il browser Playwright
         await disconnetti_whatsapp()
         await asyncio.sleep(2.0)
         
-        # 2. Elimina la cartella whatsapp_session con tutte le chiavi ed IndexedDB salvati
         try:
             if os.path.exists(SESSION_DIR):
                 shutil.rmtree(SESSION_DIR, ignore_errors=True)
@@ -478,8 +486,6 @@ async def reset_whatsapp_banco():
             add_whatsapp_log(f"⚠️ Avviso pulizia cartella sessione: {e}", "WARN")
             
         os.makedirs(SESSION_DIR, exist_ok=True)
-        
-        # 3. Reset totale dello stato in memoria e svuotamento del DB ordini
         messaggi_processati.clear()
         await svuota_database_ordini()
         add_whatsapp_log("🧹 Database locale ordini svuotato automaticamente.", "INFO")
@@ -491,7 +497,6 @@ async def reset_whatsapp_banco():
         WHATSAPP_STATE["ultimo_messaggio"] = None
         add_whatsapp_log("✨ Banco dimenticato con successo. Avvio della nuova registrazione...", "SUCCESS")
         
-        # 4. Avvia nuovamente la procedura WhatsApp per generare da subito un nuovo QR Code
         asyncio.create_task(avvia_whatsapp())
         return True
     except Exception as e:
@@ -499,7 +504,6 @@ async def reset_whatsapp_banco():
         return False
 
 async def avvia_whatsapp():
-    """Avvia il browser e gestisce lo stato di connessione e scansione QR Code."""
     global CURRENT_PAGE, BROWSER_CONTEXT, PLAYWRIGHT_INSTANCE
     
     add_whatsapp_log("🚀 Inizializzazione motore Playwright WhatsApp (Native Chrome Stealth Mode)...", "INFO")
@@ -516,7 +520,7 @@ async def avvia_whatsapp():
         PLAYWRIGHT_INSTANCE = await async_playwright().start()
         os.makedirs(SESSION_DIR, exist_ok=True)
         
-        HEADLESS = True
+        HEADLESS = False
         chrome_binary = None
         for candidate in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser", "/usr/bin/chromium"]:
             if os.path.exists(candidate):
@@ -533,8 +537,8 @@ async def avvia_whatsapp():
                 "--disable-infobars",
                 "--no-first-run",
                 "--ignore-certificate-errors",
-                "--autoplay-policy=no-user-gesture-required",  # Sblocca i vocali nella modalità invisibile
-                "--mute-audio"  # Silenzia il server per evitare suoni fisici
+                "--autoplay-policy=no-user-gesture-required",
+                "--mute-audio"
             ],
             "ignore_default_args": ["--enable-automation"],
             "viewport": {"width": 1280, "height": 800},
@@ -560,7 +564,6 @@ async def avvia_whatsapp():
         await page.goto("https://web.whatsapp.com/")
         add_whatsapp_log("📱 Pagina web.whatsapp.com caricata in modalità protetta.", "INFO")
 
-        # Monitora la presenza del QR Code o del pannello principale chat
         connected = False
         for _ in range(30):
             if CURRENT_PAGE is None or CURRENT_PAGE != page or WHATSAPP_STATE["stato_connessione"] == "DISCONNESSO" or page.is_closed():
@@ -570,7 +573,6 @@ async def avvia_whatsapp():
                     connected = True
                     break
 
-                # Cattura screenshot del QR code se presente
                 qr_canvas = page.locator("canvas, div[data-ref]")
                 if await qr_canvas.count() > 0:
                     WHATSAPP_STATE["stato_connessione"] = "IN_ATTESA_QR"
@@ -589,13 +591,11 @@ async def avvia_whatsapp():
             if CURRENT_PAGE is None or CURRENT_PAGE != page or WHATSAPP_STATE["stato_connessione"] == "DISCONNESSO" or page.is_closed():
                 return
             try:
-                # Attesa indefinita fino al login
                 await page.wait_for_selector("div#pane-side", timeout=0)
             except Exception as e:
                 if "closed" in str(e).lower() or page.is_closed() or CURRENT_PAGE != page:
                     return
 
-        # Login effettuato
         WHATSAPP_STATE["stato_connessione"] = "CONNESSO"
         WHATSAPP_STATE["qr_code_base64"] = None
         WHATSAPP_STATE["data_connessione"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
@@ -603,39 +603,36 @@ async def avvia_whatsapp():
         
         add_whatsapp_log("🟢 WHATSAPP BANCO CONNESSO ED ATTIVO!", "SUCCESS")
 
-        # Avvia demone schedulatore broadcast in background
-        from backend.broadcast import avvia_demone_broadcast
-        asyncio.create_task(avvia_demone_broadcast(get_current_whatsapp_page))
+        global BROADCAST_DEMONE_ATTIVO
+        if not BROADCAST_DEMONE_ATTIVO:
+            from backend.broadcast import avvia_demone_broadcast
+            BROADCAST_DEMONE_ATTIVO = True
+            asyncio.create_task(avvia_demone_broadcast(get_current_whatsapp_page))
+            add_whatsapp_log("📢 Demone broadcast avviato.", "INFO")
+        else:
+            add_whatsapp_log("📢 Demone broadcast già attivo, non ne avvio un secondo.", "INFO")
 
-        # Scansione iniziale: elabora i messaggi non ancora salvati nel DB ricevuti oggi dalle 8:00
         try:
             dati_iniziali = await estrai_chat_visibili(page)
             n_unreads = 0
             for msg in dati_iniziali:
-                chiave = f"{msg['mittente']}_{msg['testo']}_{msg.get('time_str', '')}"
+                chiave = f"{msg.get('data_id') or ''}_{msg['mittente']}_{msg['testo']}_{msg.get('time_str', '')}"
                 already_in_db = await ordine_esiste_in_db(msg['mittente'], msg['testo'], msg.get('time_str'))
                 if msg.get('is_unread') or not already_in_db:
                     n_unreads += 1
                     add_whatsapp_log(
                         f"⚡ [STARTUP/RECUPERO] Rilevato ordine/messaggio da {msg['mittente']} ({msg.get('time_str', 'oggi')}): {msg['testo'][:35]}",
-                        "INCOMING",
-                        metadata={
-                            "mittente": msg.get('mittente'),
-                            "row_index": msg.get('row_index'),
-                            "time_str": msg.get('time_str'),
-                            "is_vocal": msg.get('is_vocal')
-                        }
+                        "INCOMING"
                     )
                     messaggi_processati.add(chiave)
-                    await elabora_nuovo_messaggio(msg, page)
-                    await asyncio.sleep(1.0)
+                    asyncio.create_task(elabora_nuovo_messaggio(msg, page))
+                    await asyncio.sleep(0.1) 
                 else:
                     messaggi_processati.add(chiave)
-            add_whatsapp_log(f"🟢 MOTORE ATTIVO 24/7! Sincronizzazione completata ({n_unreads} ordini/messaggi in arrivo elaborati).", "SUCCESS")
+            add_whatsapp_log(f"🟢 MOTORE ATTIVO 24/7! Sincronizzazione completata ({n_unreads} ordini/messaggi in arrivo avviati).", "SUCCESS")
         except Exception as e:
             add_whatsapp_log(f"⚠️ Avviso sincronizzazione iniziale: {e}", "WARN")
 
-      # LOOP PRINCIPALE (Priorità agli ultimi arrivati)
         while True:
             if CURRENT_PAGE is None or CURRENT_PAGE != page or WHATSAPP_STATE["stato_connessione"] == "DISCONNESSO" or page.is_closed():
                 add_whatsapp_log("🛑 Loop monitoraggio terminato per questa istanza.", "INFO")
@@ -643,28 +640,22 @@ async def avvia_whatsapp():
             
             try:
                 dati_chat_visibili = await estrai_chat_visibili(page)
-                
-                # TRUCCO: WhatsApp mette SEMPRE le chat più recenti in cima (row_index 0).
-                # Ordiniamo la lista in base alla posizione nello schermo (dall'alto verso il basso).
                 dati_chat_visibili.sort(key=lambda m: m.get('row_index', 0))
                 
-                # Filtriamo tutti i messaggi che il bot non ha ancora processato
                 da_processare = [
                     msg for msg in dati_chat_visibili 
-                    if f"{msg['mittente']}_{msg['testo']}_{msg.get('time_str', '')}" not in messaggi_processati
+                    if f"{msg.get('data_id') or ''}_{msg['mittente']}_{msg['testo']}_{msg.get('time_str', '')}" not in messaggi_processati
                 ]
 
-                # Se c'è almeno un messaggio nuovo...
                 if da_processare:
-                    # ...prendiamo SEMPRE il primo della lista (il più recente in assoluto!)
                     msg_urgente = da_processare[0]
-                    chiave_univoca = f"{msg_urgente['mittente']}_{msg_urgente['testo']}_{msg_urgente.get('time_str', '')}"
+                    chiave_univoca = f"{msg_urgente.get('data_id') or ''}_{msg_urgente['mittente']}_{msg_urgente['testo']}_{msg_urgente.get('time_str', '')}"
                     
                     messaggi_processati.add(chiave_univoca)
-                    await elabora_nuovo_messaggio(msg_urgente, page)
                     
-                    # Aspettiamo mezzo secondo per far respirare il browser
-                    await asyncio.sleep(0.5)
+                    asyncio.create_task(elabora_nuovo_messaggio(msg_urgente, page))
+                    
+                    await asyncio.sleep(0.1)
 
             except Exception as e:
                 err_msg = str(e).lower()

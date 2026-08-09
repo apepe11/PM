@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 import logging
+import re
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -29,8 +30,6 @@ def apri_file_nativo_os(filepath: str) -> bool:
         logging.error(f"⚠️ Impossibile aprire file nativo OS ({filepath}): {e}")
         return False
 
-import re
-
 def formatta_data_it(data_str: str) -> str:
     """Converte una data YYYY-MM-DD o ISO nel formato italiano DD/MM/YYYY."""
     if not data_str:
@@ -41,6 +40,14 @@ def formatta_data_it(data_str: str) -> str:
         y, m, d, t = match.groups()
         return f"{d}/{m}/{y} {t}".strip() if t else f"{d}/{m}/{y}"
     return clean
+
+def _safe_float(v, default=0.0):
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except (TypeError, ValueError):
+        return default
 
 def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -> bytes:
     """Genera il PDF per il casaro con il totale della produzione aggregata per il giorno specificato."""
@@ -129,11 +136,13 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
     ]
 
     for prod in lista_produzione:
+        tot_kg = _safe_float(prod.get("quantita_totale", prod.get("totale_kg", 0)))
+        n_ordini = _safe_float(prod.get("numero_ordini", prod.get("totale_pezzi", 0)))
         data_table.append([
             Paragraph(str(prod.get("codice_articolo", prod.get("codice", ""))), cell_style),
             Paragraph(str(prod.get("nome_prodotto", prod.get("nome", ""))), cell_style),
-            Paragraph(f"<b>{prod.get("quantita_totale", prod.get("totale_kg", 0)):.2f} KG</b>", cell_style),
-            Paragraph(f"<b>{prod.get("numero_ordini", prod.get("totale_pezzi", 0)):.0f}</b>", cell_style)
+            Paragraph(f"<b>{tot_kg:.2f} KG</b>", cell_style),
+            Paragraph(f"<b>{n_ordini:.0f}</b>", cell_style)
         ])
 
     table = Table(data_table, colWidths=[3.5*cm, 8.5*cm, 3.0*cm, 3.0*cm])
@@ -359,11 +368,16 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
             f"• {p.get('nome_articolo') or p.get('codice_articolo')}: {p.get('quantita')} {p.get('unita_di_misura')} ({p.get('grammatura','-')})"
             for p in o.get('prodotti', [])
         ])
+        peso_raw = o.get('peso_reale')
+        if peso_raw is not None and str(peso_raw).strip() not in ('', '-'):
+            peso_str = f"<b>{_safe_float(peso_raw):.2f} KG</b>"
+        else:
+            peso_str = "<b>-</b>"
         data_tab.append([
             Paragraph(f"#{idx}", cell_norm),
             Paragraph(f"<b>{o.get('mittente','')}</b><br/><font size=7 color='#666666'>{o.get('note_ordine','')}</font>", cell_norm),
             Paragraph(prods_str or "-", cell_norm),
-            Paragraph(f"<b>{o.get('peso_reale') or '-'} KG</b>", cell_bold),
+            Paragraph(peso_str, cell_bold),
             Paragraph(f"<b>{o.get('numero_lotto') or '-'}</b>", cell_bold)
         ])
 
@@ -371,6 +385,77 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
     table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#d1fae5')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#a7f3d0')),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(table)
+
+    doc.build(story)
+    return buffer.getvalue()
+
+def genera_pdf_ordini_generale(data_str: str, ordini: list) -> bytes:
+    """Genera il PDF riepilogativo con la lista di tutti gli ordini per la preparazione."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm
+    )
+    story = []
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        'DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=18, leading=22, textColor=colors.HexColor('#4e2a1e')
+    )
+    sub_style = ParagraphStyle(
+        'DocSubTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=14, textColor=colors.HexColor('#7d5236')
+    )
+    cell_bold = ParagraphStyle(
+        'CellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=12, textColor=colors.HexColor('#1c1917')
+    )
+    cell_norm = ParagraphStyle(
+        'CellNorm', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=12, textColor=colors.HexColor('#1c1917')
+    )
+
+    data_formatted = formatta_data_it(data_str) if data_str else "Tutti gli ordini"
+
+    if os.path.exists(LOGO_PATH):
+        img = Image(LOGO_PATH, width=2.5*cm, height=2.5*cm)
+        img.hAlign = 'LEFT'
+        header_text = [
+            Paragraph("CASEIFICIO PETRUZZI DAL 1923", title_style),
+            Spacer(1, 0.1*cm),
+            Paragraph(f"RIEPILOGO GENERALE ORDINI CLIENTI — CONSEGNA: {data_formatted}", sub_style),
+            Paragraph(f"Generato il: {datetime.now().strftime('%d/%m/%Y alle %H:%M')}", styles['Italic'])
+        ]
+        header_table = Table([[img, header_text]], colWidths=[3.0*cm, 15.0*cm])
+        story.append(header_table)
+    else:
+        story.append(Paragraph("CASEIFICIO PETRUZZI DAL 1923", title_style))
+        story.append(Paragraph(f"RIEPILOGO GENERALE ORDINI CLIENTI — CONSEGNA: {data_formatted}", sub_style))
+
+    story.append(Spacer(1, 0.4*cm))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#d97706'), spaceBefore=1, spaceAfter=12))
+
+    data_tab = [
+        [
+            Paragraph("<b>CLIENTE</b>", cell_bold),
+            Paragraph("<b>ARTICOLI ORDINATI</b>", cell_bold),
+            Paragraph("<b>NOTE / DETTAGLI</b>", cell_bold)
+        ]
+    ]
+
+    for o in ordini:
+        prods_str = "<br/>".join([f"• {p.get('nome_articolo') or p.get('codice_articolo')}: <b>{p.get('quantita')} {p.get('unita_di_misura')}</b>" for p in o.get('prodotti', [])])
+        data_tab.append([
+            Paragraph(f"<b>{o.get('mittente','')}</b>", cell_bold),
+            Paragraph(prods_str, cell_norm),
+            Paragraph(o.get("note_ordine") or "-", cell_norm)
+        ])
+
+    table = Table(data_tab, colWidths=[5.0*cm, 8.0*cm, 5.0*cm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#fef3c7')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('TOPPADDING', (0,0), (-1,-1), 6),
         ('BOTTOMPADDING', (0,0), (-1,-1), 6),

@@ -1,11 +1,38 @@
 import json
 import os
 import re
+import ast
 import aiosqlite
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 DB_FILE = "petruzzi_ordini.db"
+
+
+def parse_dati_estratti_ia(dati_raw) -> dict:
+    """Parsing robusto e centralizzato di dati_estratti_ia, gestisce sia JSON valido
+    sia repr() di dict Python salvati per errore altrove nel sistema."""
+    if not dati_raw:
+        return {}
+    if isinstance(dati_raw, dict):
+        return dati_raw
+    if isinstance(dati_raw, str):
+        try:
+            return json.loads(dati_raw)
+        except Exception:
+            pass
+        try:
+            return ast.literal_eval(dati_raw)
+        except Exception:
+            return {}
+    return {}
+
+
+def _calcola_data_consegna_target_pura(ora_attuale: datetime) -> datetime:
+    """Versione standalone (nessuna dipendenza da ai_parser) per evitare import ciclici pericolosi."""
+    if ora_attuale.hour < 8:
+        return ora_attuale
+    return ora_attuale + timedelta(days=1)
 
 
 def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = None) -> Optional[str]:
@@ -19,23 +46,16 @@ def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = 
             if not raw:
                 return None
 
-                # ISO date or datetime
-                for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
-                    try:
-                        parsed = datetime.strptime(raw, fmt)
-                        return parsed.strftime('%Y-%m-%d')
-                    except ValueError:
-                        pass
-
-                # Italiano dd/mm/YYYY o dd/mm/YYYY HH:MM:SS
-                for fmt in ('%d/%m/%Y', '%d/%m/%Y %H:%M:%S'):
-                    try:
-                        parsed = datetime.strptime(raw, fmt)
-                        return parsed.strftime('%Y-%m-%d')
-                    except ValueError:
-                        pass
+            for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
                 try:
-                    parsed = datetime.strptime(candidate, '%d/%m/%Y')
+                    parsed = datetime.strptime(raw, fmt)
+                    return parsed.strftime('%Y-%m-%d')
+                except ValueError:
+                    pass
+
+            for fmt in ('%d/%m/%Y', '%d/%m/%Y %H:%M:%S'):
+                try:
+                    parsed = datetime.strptime(raw, fmt)
                     return parsed.strftime('%Y-%m-%d')
                 except ValueError:
                     pass
@@ -45,12 +65,10 @@ def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = 
             dt_ric = datetime.strptime(data_ricezione, '%Y-%m-%d %H:%M:%S')
         except Exception:
             dt_ric = datetime.now()
-        from backend.ai_parser import calcola_data_consegna_target
-        return calcola_data_consegna_target(dt_ric)[0].strftime('%Y-%m-%d')
+        return _calcola_data_consegna_target_pura(dt_ric).strftime('%Y-%m-%d')
 
     return None
 
-# Carica mappa prodotti da JSON per arricchimento nomi
 CATALOGO_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "catalogo_prodotti.json"))
 PARTICOLARITA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
 PRODOTTI_MAP = {}
@@ -68,10 +86,6 @@ if os.path.exists(CATALOGO_FILE):
         print(f"⚠️ Errore caricamento catalogo in db.py: {e}")
 
 async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, dati_ia: dict):
-    """
-    Registra o aggiorna automaticamente la rubrica ed il profilo cliente in catalogo/particolarita_clienti.json.
-    Salva numero di telefono, abitudini, note ed uno storico degli ordini d'esempio.
-    """
     if not mittente or mittente.strip().lower() in ["tu", "you", "banco", "me", "io"]:
         return
 
@@ -103,7 +117,6 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
                 break
 
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
         nuovo_esempio = {
             "data": now_str,
             "messaggio_raw": testo_originale[:150],
@@ -144,14 +157,10 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
 
         with open(PARTICOLARITA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data_json, f, indent=2, ensure_ascii=False)
-            
-        print(f"📄 Rubrica e particolarità cliente salvate in catalogo/particolarita_clienti.json per '{nome_solo}'")
-
     except Exception as e:
         print(f"⚠️ Errore salvataggio particolarita_clienti.json: {e}")
 
 async def init_db():
-    """Inizializza il database locale SQLite e popola con dati iniziali di test se vuoto."""
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ordini (
@@ -205,16 +214,9 @@ async def init_db():
             )
         """)
         await db.commit()
-
-        await db.commit()
         print("🗄️ Database Locale SQLite pronto.")
 
 async def get_storico_oggi(mittente: str) -> str:
-    """
-    Recupera l'ultima conversazione attiva con questo cliente per il ciclo di consegna corrente o futuro,
-    garantendo che integrazioni, correzioni e annullamenti inviati ore più tardi (o la mattina dopo)
-    vengano correlati correttamente all'ordine in corso.
-    """
     today_str = datetime.now().strftime('%Y-%m-%d')
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute(
@@ -226,25 +228,15 @@ async def get_storico_oggi(mittente: str) -> str:
             return ""
         
         testo_orig, dati_ia_raw, data_ric = row
-        dati_parsed = {}
-        if dati_ia_raw:
-            try:
-                if isinstance(dati_ia_raw, str):
-                    dati_parsed = json.loads(dati_ia_raw)
-                elif isinstance(dati_ia_raw, dict):
-                    dati_parsed = dati_ia_raw
-            except Exception:
-                dati_parsed = {}
+        dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
 
         data_consegna = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
-        # Se l'ordine appartiene al ciclo corrente o futuro (data_consegna >= oggi)
         if not data_consegna or data_consegna >= today_str:
             return testo_orig
         
         return ""
 
 async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str] = None) -> bool:
-    """Verifica se un messaggio da un determinato mittente è già registrato nel database ordini."""
     async with aiosqlite.connect(DB_FILE) as db:
         clean_text = testo.replace("🎙️ [MESSAGGIO VOCALE]", "").strip()[:30]
         if not clean_text:
@@ -257,7 +249,6 @@ async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str]
         return bool(row)
 
 async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estratti: str, data_ricezione_custom: Optional[str] = None):
-    """Se il cliente ha un ordine attivo per il ciclo di consegna corrente/futuro, unisce i messaggi e aggiorna l'ordine."""
     today_str = datetime.now().strftime('%Y-%m-%d')
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute(
@@ -271,15 +262,7 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
         
         if row:
             id_ord, testo_orig, dati_ia_raw, data_ric = row
-            dati_parsed = {}
-            if dati_ia_raw:
-                try:
-                    if isinstance(dati_ia_raw, str):
-                        dati_parsed = json.loads(dati_ia_raw)
-                    elif isinstance(dati_ia_raw, dict):
-                        dati_parsed = dati_ia_raw
-                except Exception:
-                    dati_parsed = {}
+            dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
 
             data_consegna = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
             if not data_consegna or data_consegna >= today_str:
@@ -297,43 +280,54 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             pass
 
         if target_id:
-            testo_combinato = f"{storico_precedente}\n[Integrazione/Correzione]: {nuovo_messaggio}"
+            # 🛡️ SCUDO ANTI-LOOP TOTALE (BIDIREZIONALE)
+            import re
+            def normalize_str(s):
+                return re.sub(r'\W+', '', s).lower()
+
+            norm_nuovo = normalize_str(nuovo_messaggio)
+            norm_storico = normalize_str(storico_precedente)
+
+            # Se il nuovo messaggio è già dentro lo storico
+            if norm_nuovo in norm_storico:
+                testo_combinato = storico_precedente
+                print("🚫 [ANTI-LOOP]: Messaggio ignorato perché già presente nello storico.")
+            # Se lo storico è già contenuto nel nuovo messaggio (il messaggio si sta espandendo)
+            elif norm_storico in norm_nuovo:
+                testo_combinato = nuovo_messaggio
+                print("🚫 [ANTI-LOOP]: Il nuovo messaggio contiene già il vecchio, aggiorno senza duplicare.")
+            else:
+                testo_combinato = f"{storico_precedente}\n[Integrazione/Correzione]: {nuovo_messaggio}"
+            
             await db.execute(
                 "UPDATE ordini SET testo_originale = ?, dati_estratti_ia = ?, data_ricezione = ? WHERE id = ?",
                 (testo_combinato, dati_estratti, now_str, target_id)
             )
-            print(f"🔄 Ordine attivo di {mittente} (ID #{target_id}) AGGIORNATO nel database alle {now_str}.")
         else:
             await db.execute(
                 "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
                 (mittente, nuovo_messaggio, dati_estratti, now_str)
             )
-            print(f"💾 Nuovo ordine di {mittente} SALVATO nel database con timestamp di ricezione: {now_str}.")
             
         await db.commit()
 
         try:
             dati_parsed_obj = json.loads(dati_estratti)
             await registra_o_aggiorna_cliente_json(mittente, nuovo_messaggio, dati_parsed_obj)
-        except Exception as e:
-            print(f"⚠️ Avviso aggiornamento rubrica json: {e}")
+        except Exception:
+            pass   
+
 
 def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
-    """Estrae il peso unitario in KG dal nome o codice del prodotto (es. 'Bocconcini 0,250KG' -> 0.25)."""
     if not nome_o_codice:
         return 0.0
-    
     text = nome_o_codice.lower().replace(',', '.')
-    
-    # Cerca kg (es. 0.250kg, 0.5kg, 1kg)
     match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', text)
     if match_kg:
         try:
             return float(match_kg.group(1))
         except ValueError:
             pass
-            
-    # Cerca grammi (es. 250g, 300g, 500gr)
     match_g = re.search(r'(\d+(?:\.\d+)?)\s*(?:g|gr|grammi)\b', text)
     if match_g:
         try:
@@ -341,11 +335,9 @@ def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
             return val / 1000.0 if val > 10 else val
         except ValueError:
             pass
-            
     return 0.0
 
 async def aggiorna_confezionamento_ordine(id_ordine: int, peso_reale: float, numero_lotto: str):
-    """Aggiorna il peso reale ed il numero di lotto per la postazione tablet confezionamento e passa l'ordine a CONFERMATO."""
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
@@ -353,16 +345,7 @@ async def aggiorna_confezionamento_ordine(id_ordine: int, peso_reale: float, num
             return False
             
         dati_raw = row[0]
-        dati_parsed = {}
-        if dati_raw:
-            try:
-                if isinstance(dati_raw, str):
-                    clean_raw = dati_raw.replace("'", '"').replace("True", "true").replace("False", "false")
-                    dati_parsed = json.loads(clean_raw)
-                elif isinstance(dati_raw, dict):
-                    dati_parsed = dati_raw
-            except Exception:
-                dati_parsed = {}
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
 
         lotto_clean = numero_lotto.upper().strip()
         dati_parsed["peso_reale"] = round(peso_reale, 2)
@@ -371,7 +354,6 @@ async def aggiorna_confezionamento_ordine(id_ordine: int, peso_reale: float, num
         dati_parsed["stato_ordine"] = "CONFERMATO"
         dati_parsed["data_conferma"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # Assegna lotto a tutti i prodotti dell'ordine
         for p in dati_parsed.get("prodotti", []):
             if not p.get("numero_lotto"):
                 p["numero_lotto"] = lotto_clean
@@ -383,8 +365,7 @@ async def aggiorna_confezionamento_ordine(id_ordine: int, peso_reale: float, num
         await db.commit()
         return True
 
-async def conferma_ordine(id_ordine: int, prodotti_aggiornati: Optional[list] = None, numero_lotto_generale: Optional[str] = None):
-    """Contrassegna l'ordine come CONFERMATO ed aggiorna lotti e grammature dei singoli articoli."""
+async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numero_lotto: Optional[str] = None):
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
@@ -392,36 +373,31 @@ async def conferma_ordine(id_ordine: int, prodotti_aggiornati: Optional[list] = 
             return False
             
         dati_raw = row[0]
-        dati_parsed = {}
-        if dati_raw:
-            try:
-                if isinstance(dati_raw, str):
-                    clean_raw = dati_raw.replace("'", '"').replace("True", "true").replace("False", "false")
-                    dati_parsed = json.loads(clean_raw)
-                elif isinstance(dati_raw, dict):
-                    dati_parsed = dati_raw
-            except Exception:
-                dati_parsed = {}
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
 
-        lotto_default = (numero_lotto_generale or dati_parsed.get("numero_lotto") or f"L{datetime.now().strftime('%y%m%d')}").strip().upper()
+        # 1. Imposta il lotto generale (se lo hai scritto) oppure genera quello di default
+        lotto_default = (numero_lotto or dati_parsed.get("numero_lotto") or f"L{datetime.now().strftime('%y%m%d')}").strip().upper()
         
-        prodotti_attuali = prodotti_aggiornati if prodotti_aggiornati is not None else (dati_parsed.get("prodotti") or [])
-        if prodotti_attuali is None:
-            prodotti_attuali = []
+        # 2. Usa i prodotti "sporcati" dalle tue modifiche nella Modale
+        prodotti_attuali = prodotti if prodotti is not None else (dati_parsed.get("prodotti") or [])
+            
         for p in prodotti_attuali:
             cod = p.get("codice_articolo", "")
             nome = p.get("nome_articolo", "") or cod
             
+            # Se un prodotto non ha un lotto specifico, usa quello generale in alto
             if not p.get("numero_lotto"):
                 p["numero_lotto"] = lotto_default
                 
+            # 3. Rispetta TASSATIVAMENTE la grammatura scritta a mano!
             unit_w = estrai_peso_unitario_da_nome(nome)
             if unit_w > 0:
                 p["is_peso_fisso"] = True
-                p["grammatura"] = f"{unit_w:.3f} KG"
+                if not p.get("grammatura") or str(p.get("grammatura")).strip() == "":
+                    p["grammatura"] = f"{unit_w:.3f} KG"
             else:
                 p["is_peso_fisso"] = False
-                if not p.get("grammatura"):
+                if not p.get("grammatura") or str(p.get("grammatura")).strip() == "":
                     p["grammatura"] = f"{p.get('quantita', 1.0)} {p.get('unita_di_misura', 'kg')}"
 
         dati_parsed["prodotti"] = prodotti_attuali
@@ -434,7 +410,8 @@ async def conferma_ordine(id_ordine: int, prodotti_aggiornati: Optional[list] = 
             (json.dumps(dati_parsed, ensure_ascii=False), id_ordine)
         )
         await db.commit()
-
+        
+        # Aggiornamento campioni IA (Funzione già esistente)
         try:
             cursor_m = await db.execute("SELECT mittente, testo_originale FROM ordini WHERE id = ?", (id_ordine,))
             row_m = await cursor_m.fetchone()
@@ -444,9 +421,8 @@ async def conferma_ordine(id_ordine: int, prodotti_aggiornati: Optional[list] = 
             pass
 
         return True
-
+    
 async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bool = False):
-    """Recupera tutti gli ordini formattati per la dashboard e la postazione tablet."""
     async with aiosqlite.connect(DB_FILE) as db:
         query = "SELECT id, mittente, testo_originale, dati_estratti_ia, data_ricezione FROM ordini ORDER BY data_ricezione DESC"
         cursor = await db.execute(query)
@@ -457,28 +433,15 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
 
         for r in rows:
             id_ord, mittente, testo_orig, dati_ia_raw, data_ric = r
-            dati_parsed = {}
-            if dati_ia_raw:
-                try:
-                    if isinstance(dati_ia_raw, str):
-                        try:
-                            dati_parsed = json.loads(dati_ia_raw)
-                        except Exception:
-                            clean_raw = dati_ia_raw.replace("'", '"').replace("True", "true").replace("False", "false")
-                            dati_parsed = json.loads(clean_raw)
-                    elif isinstance(dati_ia_raw, dict):
-                        dati_parsed = dati_ia_raw
-                except Exception:
-                    dati_parsed = {"is_order": True, "prodotti": [], "note_ordine": str(dati_ia_raw)}
+            dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
+            if not dati_parsed and dati_ia_raw:
+                dati_parsed = {"is_order": True, "prodotti": [], "note_ordine": str(dati_ia_raw)}
 
-            # Calcolo data di consegna target in base al ciclo 08:00 (Giorno X 08:00 -> Giorno X+1 08:00)
             data_consegna = dati_parsed.get("data_consegna")
             data_consegna = normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
             if not data_consegna:
-                # Se non è presente, oppure non è in formato ISO valido, calcola la data di consegna dal timestamp del messaggio
                 data_consegna = normalize_data_consegna(None, data_ric)
 
-            # Se è applicato un filtro per la data di consegna target
             if data_filtro and data_consegna != data_filtro:
                 continue
 
@@ -522,12 +485,12 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 "numero_lotto": lotto_ord,
                 "data_conferma": dati_parsed.get("data_conferma"),
                 "data_confezionamento": dati_parsed.get("data_confezionamento"),
-                "data_ricezione": data_ric
+                "data_ricezione": data_ric,
+                "timestamp_elaborazione": dati_parsed.get("timestamp_elaborazione") # ECCO LA RIGA CHE MANCAVA!
             })
         return ordini_lista
 
 async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
-    """Crea un ordine manuale dalla dashboard."""
     if not data_consegna:
         data_consegna = datetime.now().strftime('%Y-%m-%d')
     
@@ -540,37 +503,32 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
         "cliente_id": mittente
     }
     testo_orig = f"[Inserimento Manuale Dashboard] {note}"
-    
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute(
+        cursor = await db.execute(
             "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
             (mittente, testo_orig, json.dumps(dati_ia, ensure_ascii=False), now_str)
         )
         await db.commit()
+        last_id = cursor.lastrowid
 
         try:
             await registra_o_aggiorna_cliente_json(mittente, testo_orig, dati_ia)
         except Exception:
             pass
 
-        return cursor.lastrowid
+        return last_id
 
 async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
-    """Aggiorna i prodotti e le note di un ordine esistente."""
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute("SELECT mittente, testo_originale, dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
         if not row:
             return False
         
-        mittente, testo_orig, dati_ia_raw = row
-        dati_parsed = {}
-        try:
-            clean_raw = dati_ia_raw.replace("'", '"').replace("True", "true").replace("False", "false")
-            dati_parsed = json.loads(clean_raw)
-        except Exception:
-            pass
+        _, _, dati_ia_raw = row
+        dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
 
         dati_parsed["prodotti"] = prodotti
         if note:
@@ -586,14 +544,12 @@ async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_c
         return True
 
 async def elimina_ordine(id_ordine: int):
-    """Elimina un ordine dal database."""
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute("DELETE FROM ordini WHERE id = ?", (id_ordine,))
         await db.commit()
         return True
 
 async def svuota_database_ordini():
-    """Svuota completamente la tabella degli ordini quando viene registrato o collegato un nuovo Banco."""
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute("DELETE FROM ordini")
         await db.commit()
@@ -601,7 +557,6 @@ async def svuota_database_ordini():
         return True
 
 async def rielabora_tutti_ordini():
-    """Rielabora l'estrazione IA di tutti gli ordini presenti nel database usando l'IA o il parser di riserva."""
     from backend.ai_parser import AIParser
     ai_parser = AIParser(base_dir="catalogo")
     
@@ -616,7 +571,6 @@ async def rielabora_tutti_ordini():
                 continue
             
             clean_text = testo_orig.replace("🎙️ [VOCALE TRASCRITTO]:", "").replace("🎙️ [MESSAGGIO VOCALE]", "").strip()
-            # Rimuovi prefissi integrazioni
             clean_text = re.sub(r'\[Integrazione/Correzione\]:', '', clean_text).strip()
             
             if not clean_text:
@@ -632,7 +586,6 @@ async def rielabora_tutti_ordini():
         return count
 
 async def get_produzione_aggregata(data_target: Optional[str] = None):
-    """Calcola i totali aggregati dei prodotti da produrre per una specifica data."""
     ordini = await get_tutti_ordini(data_target)
     totali = {}
 
@@ -640,8 +593,17 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
         if o.get("is_cancelled") or o.get("stato_ordine") == "ANNULLATO":
             continue
         for p in o.get("prodotti", []):
-            cod = p.get("codice_articolo", "GENERICO")
-            nome = p.get("nome_articolo") or (PRODOTTI_MAP.get(cod, {}).get("nome") if cod in PRODOTTI_MAP else cod)
+            cod = str(p.get("codice_articolo", "GENERICO")).strip()
+            cod_lower = cod.lower()
+            nome = str(p.get("nome_articolo") or PRODOTTI_MAP.get(cod, {}).get("nome") or cod).strip()
+            nome_lower = nome.lower()
+            
+            # --- SCUDO ANTI-FILONI ---
+            # Se il codice o il nome contengono queste parole, salta il prodotto!
+            if "filmzpe" in cod_lower or "filon" in nome_lower or "filon" in cod_lower or "panett" in nome_lower or "pizza" in nome_lower:
+                continue
+            # -------------------------
+
             qta = float(p.get("quantita", 0))
             um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()
 
@@ -656,12 +618,10 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
             totali[cod]["quantita_totale"] += qta
             totali[cod]["numero_ordini"] += 1
 
-    # Ordina per quantità decrescente
     lista_produzione = sorted(totali.values(), key=lambda x: x["quantita_totale"], reverse=True)
     return lista_produzione
 
 async def get_statistiche(periodo_tipo: str = "mensile", periodo_valore: Optional[str] = None):
-    """Restituisce le metriche KPI e i dati per i grafici filtrati per periodo (mensile, trimestrale, semestrale, annuale)."""
     tutti_ordini = await get_tutti_ordini()
     
     now = datetime.now()
@@ -690,21 +650,29 @@ async def get_statistiche(periodo_tipo: str = "mensile", periodo_valore: Optiona
             y, m = int(parts[0]), int(parts[1])
             
             if periodo_tipo == "mensile":
+                if not periodo_valore:
+                    return False
                 target_y, target_m = map(int, periodo_valore.split('-'))
                 return y == target_y and m == target_m
             elif periodo_tipo == "trimestrale":
+                if not periodo_valore or "-Q" not in periodo_valore:
+                    return False
                 py, pq = periodo_valore.split('-Q')
                 target_y = int(py)
                 quarter = int(pq)
                 target_months = range((quarter - 1) * 3 + 1, quarter * 3 + 1)
                 return y == target_y and m in target_months
             elif periodo_tipo == "semestrale":
+                if not periodo_valore or "-S" not in periodo_valore:
+                    return False
                 py, ps = periodo_valore.split('-S')
                 target_y = int(py)
                 sem = int(ps)
                 target_months = range(1, 7) if sem == 1 else range(7, 13)
                 return y == target_y and m in target_months
             elif periodo_tipo == "annuale":
+                if not periodo_valore:
+                    return False
                 target_y = int(periodo_valore)
                 return y == target_y
         except Exception:
@@ -741,10 +709,8 @@ async def get_statistiche(periodo_tipo: str = "mensile", periodo_valore: Optiona
 
     top_cliente = max(clienti_counter.items(), key=lambda x: x[1])[0] if clienti_counter else "-"
     media_kg_ordine = round(total_kg_mozzarella / total_ordini_periodo, 1) if total_ordini_periodo > 0 else 0.0
-
     trend_articoli = sorted(totali_prodotti.values(), key=lambda x: x["quantita"], reverse=True)[:8]
 
-    # Genera andamento temporale per il periodo selezionato
     volumi_temporali = []
     if periodo_tipo == "mensile":
         volumi_temporali = [
@@ -755,10 +721,11 @@ async def get_statistiche(periodo_tipo: str = "mensile", periodo_valore: Optiona
         ]
     elif periodo_tipo == "trimestrale":
         m_names = ["Mese 1", "Mese 2", "Mese 3"]
-        if "-Q1" in periodo_valore: m_names = ["Gennaio", "Febbraio", "Marzo"]
-        elif "-Q2" in periodo_valore: m_names = ["Aprile", "Maggio", "Giugno"]
-        elif "-Q3" in periodo_valore: m_names = ["Luglio", "Agosto", "Settembre"]
-        elif "-Q4" in periodo_valore: m_names = ["Ottobre", "Novembre", "Dicembre"]
+        val_str = periodo_valore or ""
+        if "-Q1" in val_str: m_names = ["Gennaio", "Febbraio", "Marzo"]
+        elif "-Q2" in val_str: m_names = ["Aprile", "Maggio", "Giugno"]
+        elif "-Q3" in val_str: m_names = ["Luglio", "Agosto", "Settembre"]
+        elif "-Q4" in val_str: m_names = ["Ottobre", "Novembre", "Dicembre"]
         
         volumi_temporali = [
             {"giorno": m_names[0], "volumi_kg": round(total_kg_mozzarella * 0.3, 1), "ordini": int(total_ordini_periodo * 0.3)},
@@ -766,7 +733,8 @@ async def get_statistiche(periodo_tipo: str = "mensile", periodo_valore: Optiona
             {"giorno": m_names[2], "volumi_kg": round(total_kg_mozzarella * 0.32, 1), "ordini": int(total_ordini_periodo * 0.3)},
         ]
     elif periodo_tipo == "semestrale":
-        s_months = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu"] if "-S1" in periodo_valore else ["Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
+        val_str = periodo_valore or ""
+        s_months = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu"] if "-S1" in val_str else ["Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
         volumi_temporali = [
             {"giorno": m, "volumi_kg": round((total_kg_mozzarella / 6), 1), "ordini": int(total_ordini_periodo / 6)}
             for m in s_months
@@ -793,7 +761,6 @@ async def get_statistiche(periodo_tipo: str = "mensile", periodo_valore: Optiona
     }
 
 async def get_filoni_per_cliente(data_target: Optional[str] = None):
-    """Restituisce la lista degli ordini contenenti FILONI raggruppati per cliente."""
     ordini = await get_tutti_ordini(data_target)
     clienti_filoni = []
 
@@ -823,10 +790,7 @@ async def get_filoni_per_cliente(data_target: Optional[str] = None):
     return clienti_filoni
 
 async def get_lista_clienti_registrati():
-    """Restituisce la lista unica dei nomi clienti registrati nel catalogo e negli ordini."""
     clienti_set = set()
-    
-    # 1. Da particolarita_clienti.json
     part_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
     if os.path.exists(part_path):
         try:
@@ -838,7 +802,6 @@ async def get_lista_clienti_registrati():
         except Exception:
             pass
 
-    # 2. Da SQLite DB (ordini mittente)
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute("SELECT DISTINCT mittente FROM ordini WHERE mittente IS NOT NULL AND mittente != ''")
         rows = await cursor.fetchall()
@@ -848,7 +811,6 @@ async def get_lista_clienti_registrati():
     return sorted(list(clienti_set))
 
 def scomponi_prodotti_pezzi(prodotti: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Scompone gli articoli ordinati a pezzi (fino a 50 pz) in righe da 1 pezzo singolo per pesatura e lotto individuale."""
     prodotti_scomposti: list[dict[str, Any]] = []
     for p in prodotti:
         um = (p.get("unita_di_misura") or "kg").lower()
@@ -874,7 +836,6 @@ def scomponi_prodotti_pezzi(prodotti: list[dict[str, Any]]) -> list[dict[str, An
     return prodotti_scomposti
 
 async def sblocca_ordine_confezionamento(id_ordine: int):
-    """Sblocca temporaneamente un ordine già confezionato per consentire modifiche dell'ultimo minuto."""
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
@@ -882,16 +843,7 @@ async def sblocca_ordine_confezionamento(id_ordine: int):
             return False
             
         dati_raw = row[0]
-        dati_parsed = {}
-        if dati_raw:
-            try:
-                if isinstance(dati_raw, str):
-                    clean_raw = dati_raw.replace("'", '"').replace("True", "true").replace("False", "false")
-                    dati_parsed = json.loads(clean_raw)
-                elif isinstance(dati_raw, dict):
-                    dati_parsed = dati_raw
-            except Exception:
-                dati_parsed = {}
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
 
         dati_parsed["stato_confezionamento"] = "IN_LAVORAZIONE"
         dati_parsed["sbloccato_da_operatore"] = True
@@ -983,7 +935,6 @@ async def elimina_broadcast_log(id_log: int):
         return True
 
 async def salva_campione_ia_cliente(cliente_id: str, testo_originale: str, dati_confermati: dict):
-    """Salva un campione di traduzione/ordine confermato per l'addestramento continuo dell'IA per uno specifico cliente."""
     if not cliente_id or not testo_originale:
         return False
     async with aiosqlite.connect(DB_FILE) as db:
@@ -996,7 +947,6 @@ async def salva_campione_ia_cliente(cliente_id: str, testo_originale: str, dati_
         return True
 
 async def get_campioni_ia_cliente(cliente_id: str, limit: int = 5):
-    """Restituisce gli ultimi campioni di messaggi passati e confermati per lo specifico cliente."""
     if not cliente_id:
         return []
     async with aiosqlite.connect(DB_FILE) as db:

@@ -33,7 +33,14 @@ from backend.db import (
     DB_FILE
 )
 from fastapi.responses import Response, FileResponse
-from backend.pdf_generator import genera_pdf_produzione_totale, genera_pdf_singolo_ordine, genera_pdf_filoni
+from backend.pdf_generator import (
+    genera_pdf_produzione_totale, 
+    genera_pdf_singolo_ordine, 
+    genera_pdf_filoni,
+    genera_pdf_ordini_confezionati_banco,
+    genera_pdf_ordini_generale, # <-- AGGIUNTO QUESTO
+    apri_file_nativo_os
+)
 from backend.whatsapp import avvia_whatsapp, get_whatsapp_status, disconnetti_whatsapp, reset_whatsapp_banco
 
 app = FastAPI(title="Petruzzi Manager - Dashboard API")
@@ -273,6 +280,22 @@ async def download_pdf_ordine(id_ordine: int):
         raise HTTPException(status_code=404, detail="Ordine non trovato")
     pdf_bytes = genera_pdf_singolo_ordine(target_ord)
     filename = f"ordine_{target_ord['mittente'].replace(' ', '_')}.pdf"
+    salva_e_apri_pdf_temp(pdf_bytes, filename)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}"}
+    )
+
+@app.get("/api/pdf/ordini-generale")
+async def download_pdf_ordini_generale(data: Optional[str] = Query(None)):
+    target_date = data if data else datetime.now().strftime('%Y-%m-%d')
+    ordini = await get_tutti_ordini(target_date)
+    # Filtriamo via quelli annullati
+    ordini_attivi = [o for o in ordini if not o.get('is_cancelled') and o.get('stato_ordine') != 'ANNULLATO']
+    
+    pdf_bytes = genera_pdf_ordini_generale(target_date, ordini_attivi)
+    filename = f"ordini_generali_{target_date}.pdf"
     salva_e_apri_pdf_temp(pdf_bytes, filename)
     return Response(
         content=pdf_bytes,
