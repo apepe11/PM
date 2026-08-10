@@ -20,7 +20,11 @@ if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY non impostata. Creare un file .env con GROQ_API_KEY=...")
 
 client_groq = Groq(api_key=GROQ_API_KEY)
+
+# Modello principale (Alta precisione)
 GROQ_MODEL = "llama-3.3-70b-versatile"
+# Modello di riserva (Leggermente meno preciso, ma limiti altissimi per evitare blocchi)
+GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant"
 GROQ_AUDIO_MODEL = "whisper-large-v3"
 
 GROQ_LOCK = asyncio.Lock()
@@ -149,7 +153,6 @@ class AIParser:
         return ""
 
     def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = "", data_attiva_str: str = ""):
-        # COMPRESSIONE ESTREMA DEL CATALOGO
         catalogo_compresso = []
         for p in self.catalog:
             catalogo_compresso.append({
@@ -221,13 +224,11 @@ class AIParser:
         
         testo_trascritto_vocale = ""
 
-        # --- TRASCRIZIONE AUDIO GROQ WHISPER ---
         if audio_data:
             try:
                 logging.info(f"🎙️ Avvio trascrizione Groq Whisper per {client_name}...")
                 audio_bytes = base64.b64decode(audio_data)
                 
-                # Chiamata al modello audio Whisper di Groq
                 transcription = client_groq.audio.transcriptions.create(
                   file=("audio.ogg", audio_bytes),
                   model=GROQ_AUDIO_MODEL,
@@ -237,7 +238,6 @@ class AIParser:
                 testo_trascritto_vocale = transcription.text
                 logging.info(f"🎙️ Trascrizione completata: {testo_trascritto_vocale}")
                 
-                # Uniamo la trascrizione al testo originale da analizzare
                 text_to_parse = f"{text_to_parse}\n[TRASCRIZIONE VOCALE]: {testo_trascritto_vocale}"
             except Exception as e:
                 logging.error(f"❌ Errore trascrizione audio Groq Whisper: {e}")
@@ -251,7 +251,9 @@ class AIParser:
                 "da_verificare_manualmente": False
             }
 
-        # Recuperiamo dinamicamente la data attiva per passarla al prompt
+        if storico_oggi and len(storico_oggi) > 1000:
+            storico_oggi = "[...]\n" + storico_oggi[-1000:]
+
         try:
             from backend.db import get_campioni_ia_cliente, get_data_attiva
             data_attiva_str = await get_data_attiva()
@@ -267,11 +269,13 @@ class AIParser:
             campioni_str = "\n".join([f"- In:\"{c.get('testo_originale', '')}\"->Out:{json.dumps(c.get('dati_confermati', {}), separators=(',', ':'), ensure_ascii=False)}" for c in campioni])
 
         max_attempts = 3
+        current_model = GROQ_MODEL
+
         for attempt in range(max_attempts):
             async with GROQ_LOCK:
                 now = time.time()
                 elapsed = now - LAST_GROQ_REQUEST_TIME
-                min_pacing = 0.5
+                min_pacing = 2.0 
                 if elapsed < min_pacing:
                     await asyncio.sleep(min_pacing - elapsed)
                 LAST_GROQ_REQUEST_TIME = time.time()
@@ -285,7 +289,7 @@ class AIParser:
                     prompt_utente = f"Messaggio ricevuto da {client_name}:\n\"{text_to_parse}\""
 
                 completion = client_groq.chat.completions.create(
-                    model=GROQ_MODEL,
+                    model=current_model,
                     messages=[
                         {"role": "system", "content": prompt_sistema},
                         {"role": "user", "content": prompt_utente}
@@ -302,11 +306,9 @@ class AIParser:
 
                 parsed_json = json.loads(raw_text)
                 
-                # Se avevamo trascritto un vocale, assicuriamoci che l'IA non l'abbia perso
                 if testo_trascritto_vocale and not parsed_json.get("testo_trascritto"):
                     parsed_json["testo_trascritto"] = testo_trascritto_vocale
                 
-                # --- GESTIONE NOME CLIENTE REALE (VIA ANDREA ALIANDRO) ---
                 cliente_finale = client_name
                 if "andrea aliandro" in (client_name or "").lower():
                     estratto = str(parsed_json.get("cliente_reale", "")).strip()
@@ -341,13 +343,21 @@ class AIParser:
                 return parsed_json
 
             except Exception as e:
-                logging.warning(f"⚠️ Tentativo {attempt + 1} Groq fallito ({e}). Riprovo...")
-                if attempt < max_attempts - 1:
+                err_str = str(e).lower()
+                if "rate limit" in err_str or "429" in err_str:
+                    if "tokens per day" in err_str and current_model == GROQ_MODEL:
+                        logging.warning(f"⚠️ Quota Token Giornaliera ({GROQ_MODEL}) esaurita! Cambio modello in corsa...")
+                        current_model = GROQ_FALLBACK_MODEL
+                    
+                    logging.warning(f"⚠️ Tentativo {attempt + 1} Groq fallito (Rate Limit). Riprovo...")
+                    await asyncio.sleep(2.5) 
+                else:
+                    logging.warning(f"⚠️ Tentativo {attempt + 1} Groq fallito ({e}). Riprovo...")
                     await asyncio.sleep(1.0)
-                    continue
-
-                logging.error(f"❌ Errore definitivo Groq IA: {e}. Attivazione Parser Locale di riserva.")
-                return self.fallback_local_parse(text_to_parse, client_name, message_timestamp, data_attiva_str)
+                
+                if attempt == max_attempts - 1:
+                    logging.error(f"❌ Errore definitivo Groq IA: {e}. Attivazione Parser Locale di riserva.")
+                    return self.fallback_local_parse(text_to_parse, client_name, message_timestamp, data_attiva_str)
 
         return self.fallback_local_parse(text_to_parse, client_name, message_timestamp, data_attiva_str)
 
@@ -371,9 +381,11 @@ class AIParser:
             syns = [s.strip().lower() for s in (item.get("sinonimi") or "").split(",") if s.strip()]
             syn_entries.append({"cod": cod, "nome": nome, "um": um, "sinonimi": syns})
 
-        matches = re.findall(r'(?:n[°\s]*)?(\d+(?:[.,]\d+)?)\s*([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{2,30})', text_to_parse or "", re.IGNORECASE)
+        # REGEX MIGLIORATA: cattura il numero, la sigla dell'unità di misura (opzionale) e il nome del prodotto
+        pattern = r'(?:n[°\s]*)?(\d+(?:[.,]\d+)?)\s*(kg|k|chili|kili|g|gr|grammi|pz|pezzi|coppia|coppie|vaschette|vaschetta|cf)?\s*(?:di\s+)?([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{3,35})'
+        matches = re.findall(pattern, text_to_parse or "", re.IGNORECASE)
 
-        for qta_str, prod_raw in matches:
+        for qta_str, um_raw, prod_raw in matches:
             try:
                 qta = float(qta_str.replace(',', '.'))
             except ValueError:
@@ -383,8 +395,19 @@ class AIParser:
                 continue
 
             p_clean = (prod_raw or "").strip().lower()
-            matched_entry = None
+            um_clean = (um_raw or "").strip().lower()
             
+            # GESTIONE AVANZATA UNITA' DI MISURA
+            um_finale = "kg"
+            if um_clean in ["pz", "pezzi", "coppia", "coppie", "vaschetta", "vaschette", "cf"]:
+                um_finale = "pezzi"
+                if um_clean in ["coppia", "coppie"]:
+                    qta *= 2  # Traduce subito 1 coppia in 2 pezzi
+            elif um_clean in ["g", "gr", "grammi"]:
+                um_finale = "kg"
+                qta = qta / 1000.0  # Converte grammi in kg (es. 500 gr -> 0.5 kg)
+
+            matched_entry = None
             for entry in syn_entries:
                 for syn in entry["sinonimi"]:
                     if syn in p_clean or p_clean in syn:
@@ -394,11 +417,15 @@ class AIParser:
                     break
 
             if matched_entry:
+                # Se il cliente non ha scritto l'unità di misura, usiamo quella predefinita del catalogo
+                if not um_clean:
+                    um_finale = matched_entry["um"]
+                    
                 prodotti_trovati.append({
                     "codice_articolo": matched_entry["cod"],
                     "nome_articolo": matched_entry["nome"],
                     "quantita": qta,
-                    "unita_di_misura": matched_entry["um"]
+                    "unita_di_misura": um_finale
                 })
 
         base_dt = message_timestamp if message_timestamp else datetime.now()
@@ -442,7 +469,6 @@ class AIParser:
 
         is_canc = bool(re.search(r'\b(?:annulla|cancella|disdici|elimina|non portarmi|non mi serve)\b', t_lower, re.IGNORECASE))
 
-        # --- GESTIONE NOME CLIENTE REALE (PARSER LOCALE) ---
         cliente_finale = client_name
         if "andrea aliandro" in (client_name or "").lower():
             match_nome = re.match(r'^([^,:\n]+)[,:\n]', text_to_parse or "")

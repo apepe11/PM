@@ -13,22 +13,12 @@ from backend.ai_parser import AIParser
 # ---------------------------------------------------------
 # CONFIGURAZIONE EVOLUTION API
 # ---------------------------------------------------------
-# 🩹 FIX: valori ora sovrascrivibili via variabili d'ambiente.
-# ATTENZIONE: il webhook_url più sotto usa "172.17.0.1" (gateway Docker),
-# il che suggerisce che l'app gira in un container separato da Evolution
-# API. Se è così, "localhost:8080" NON punta a Evolution API ma al
-# container stesso, e ogni chiamata (stato connessione, sync chat,
-# download media) fallisce silenziosamente: nessuno storico si carica.
-# Impostare EVOLUTION_URL con il nome del container/host corretto,
-# es. http://evolution-api:8080
 EVOLUTION_URL = os.environ.get("EVOLUTION_URL", "http://localhost:8080")
 EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "petruzzi_segreto_12345")
 INSTANCE_NAME = os.environ.get("EVOLUTION_INSTANCE_NAME", "banco_petruzzi")
 WEBHOOK_URL = os.environ.get("EVOLUTION_WEBHOOK_URL", "http://172.17.0.1:5000/api/whatsapp/webhook")
 WEBHOOK_EVENTS = ["APPLICATION_STARTUP", "QRCODE_UPDATED", "CONNECTION_UPDATE", "MESSAGES_UPSERT"]
 
-# 🔁 Intervallo (in secondi) del loop di sincronizzazione periodica in background.
-# Configurabile via env var WHATSAPP_SYNC_INTERVAL_SECONDS. Default: 2 minuti.
 SYNC_INTERVAL_SECONDS = int(os.environ.get("WHATSAPP_SYNC_INTERVAL_SECONDS", "120"))
 _sync_loop_task: Optional[asyncio.Task] = None
 
@@ -67,29 +57,6 @@ def _req_headers():
     }
 
 async def _configura_webhook_evolution():
-    """
-    🩹 FIX PRINCIPALE: forza sempre la (ri)configurazione del webhook su
-    Evolution API, con l'elenco completo di eventi (incluso MESSAGES_UPSERT).
-
-    In precedenza gli eventi webhook venivano inviati SOLO in fase di
-    creazione di una nuova istanza (/instance/create). Se l'istanza esiste
-    già (caso normale ad ogni riavvio dell'app), il codice si limitava a
-    rilevare stato "open" e non toccava più la configurazione webhook:
-    se per qualsiasi motivo quella configurazione non includeva
-    MESSAGES_UPSERT (o Evolution la resetta/ perde tra un riavvio e l'altro),
-    i messaggi in arrivo smettevano silenziosamente di generare webhook,
-    pur restando lo stato "CONNESSO".
-
-    Questa funzione viene richiamata ad ogni avvio/riconnessione (istanza
-    nuova o già esistente) così la configurazione webhook è sempre coerente
-    col codice, indipendentemente dalla storia dell'istanza su Evolution.
-
-    NOTA: lo schema esatto del payload di /webhook/set/{instance} può
-    variare leggermente tra le versioni di Evolution API. Quello sotto è lo
-    schema standard per la v2.x. Se il log riporta un errore su questa
-    chiamata, verificare la documentazione della versione installata
-    (Evolution API v2.3.7 in base ai log condivisi).
-    """
     payload = {
         "webhook": {
             "enabled": True,
@@ -102,44 +69,30 @@ async def _configura_webhook_evolution():
     try:
         res = requests.post(f"{EVOLUTION_URL}/webhook/set/{INSTANCE_NAME}", json=payload, headers=_req_headers(), timeout=10)
         if res.status_code in [200, 201]:
-            add_whatsapp_log(f"🔗 Webhook riconfigurato su Evolution API (eventi: {', '.join(WEBHOOK_EVENTS)}).", "SUCCESS")
+            add_whatsapp_log(f"🔗 Webhook riconfigurato su Evolution API.", "SUCCESS")
             return True
         else:
-            add_whatsapp_log(f"⚠️ Configurazione webhook fallita ({res.status_code}): {res.text}", "WARN")
+            add_whatsapp_log(f"⚠️ Configurazione webhook fallita ({res.status_code})", "WARN")
             return False
     except Exception as e:
-        add_whatsapp_log(f"⚠️ Impossibile configurare il webhook su Evolution API: {e}", "WARN")
+        add_whatsapp_log(f"⚠️ Impossibile configurare il webhook: {e}", "WARN")
         return False
 
-
 async def _loop_sincronizzazione_periodica():
-    """
-    🔁 Loop persistente richiesto: finché il processo resta acceso, ogni
-    SYNC_INTERVAL_SECONDS richiama sincronizza_chat_recenti_background()
-    (ultime ~20 chat, messaggi degli ultimi 2 giorni). È il "paracadute" che
-    recupera comunque un ordine anche se il webhook in tempo reale dovesse
-    perdersi per un problema di rete/config momentaneo — così la mattina,
-    all'apertura della dashboard, tutto risulta già elaborato.
-    """
     while True:
         try:
             if WHATSAPP_STATE.get("stato_connessione") == "CONNESSO":
                 await sincronizza_chat_recenti_background()
         except Exception as e:
-            add_whatsapp_log(f"⚠️ Errore nel loop di sincronizzazione periodica: {e}", "WARN")
+            add_whatsapp_log(f"⚠️ Errore nel loop periodico: {e}", "WARN")
         await asyncio.sleep(SYNC_INTERVAL_SECONDS)
 
-
 def avvia_loop_sincronizzazione_periodica():
-    """Avvia il loop persistente una sola volta (evita duplicati su riconnessioni multiple)."""
     global _sync_loop_task
     if _sync_loop_task is None or _sync_loop_task.done():
         _sync_loop_task = asyncio.create_task(_loop_sincronizzazione_periodica())
-        add_whatsapp_log(f"🔁 Loop di sincronizzazione periodica avviato (ogni {SYNC_INTERVAL_SECONDS}s).", "INFO")
-
 
 async def avvia_whatsapp():
-    """Inizializza o recupera l'istanza su Evolution API e avvia la sincronizzazione storico."""
     add_whatsapp_log("🚀 Connessione al motore Evolution API in corso...", "INFO")
     
     try:
@@ -151,21 +104,11 @@ async def avvia_whatsapp():
                 WHATSAPP_STATE["data_connessione"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
                 add_whatsapp_log("🟢 Istanza già connessa e operativa!", "SUCCESS")
 
-                # 🩹 FIX: forza sempre la configurazione webhook, anche su
-                # un'istanza già esistente (vedi _configura_webhook_evolution).
                 await _configura_webhook_evolution()
-
-                # 🔄 Avvia il loop persistente: la prima iterazione parte
-                # subito (senza attesa), quindi fa anche da "sync immediata".
-                # (Rimossa la chiamata singola separata: causava una doppia
-                # sincronizzazione simultanea all'avvio.)
                 avvia_loop_sincronizzazione_periodica()
                 return
             else:
                 WHATSAPP_STATE["stato_connessione"] = "IN_ATTESA_QR"
-                # 🩹 FIX: la risposta di /instance/connect/ (che contiene il nuovo QR
-                # in base64) veniva scartata: il QR non finiva mai in WHATSAPP_STATE
-                # e l'utente non aveva più modo di ricollegare il dispositivo.
                 try:
                     connect_res = requests.get(f"{EVOLUTION_URL}/instance/connect/{INSTANCE_NAME}", headers=_req_headers(), timeout=10)
                     if connect_res.status_code == 200:
@@ -178,7 +121,6 @@ async def avvia_whatsapp():
                             WHATSAPP_STATE["qr_code_base64"] = qr_base64.replace("data:image/png;base64,", "")
                 except Exception as qr_err:
                     add_whatsapp_log(f"⚠️ Impossibile recuperare il nuovo QR: {qr_err}", "WARN")
-                add_whatsapp_log("🔄 Istanza disconnessa. Richiesto nuovo QR Code.", "WARN")
                 return
     except requests.exceptions.RequestException:
         pass 
@@ -188,7 +130,7 @@ async def avvia_whatsapp():
         "qrcode": True,
         "integration": "WHATSAPP-BAILEYS",
         "webhook_url": WEBHOOK_URL,
-        "webhook_events": ["APPLICATION_STARTUP", "QRCODE_UPDATED", "CONNECTION_UPDATE", "MESSAGES_UPSERT"]
+        "webhook_events": WEBHOOK_EVENTS
     }
     
     try:
@@ -199,12 +141,7 @@ async def avvia_whatsapp():
             if qr_base64:
                 WHATSAPP_STATE["qr_code_base64"] = qr_base64.replace("data:image/png;base64,", "")
             add_whatsapp_log("✨ Nuova istanza creata. In attesa scansione QR...", "INFO")
-            # 🩹 FIX: alcune versioni di Evolution API ignorano webhook_url/
-            # webhook_events dentro /instance/create — richiama esplicitamente
-            # la configurazione dedicata per essere certi che venga applicata.
             await _configura_webhook_evolution()
-        else:
-            add_whatsapp_log(f"❌ Errore creazione istanza: {res.text}", "ERROR")
     except Exception as e:
         add_whatsapp_log(f"❌ Impossibile contattare Evolution API: {e}", "ERROR")
 
@@ -224,19 +161,63 @@ async def reset_whatsapp_banco():
     asyncio.create_task(avvia_whatsapp())
     return True
 
+
 # ---------------------------------------------------------
-# 🔄 SINCRONIZZAZIONE ATTIVA (FETCH STORICO ULTIMI 2 GIORNI)
+# HELPER PER PULIZIA NOMI CONTATTI
 # ---------------------------------------------------------
+def _trova_nome_in_rubrica_locale(phone_number: str) -> str:
+    """Cerca il numero di telefono nel nostro database locale per usare il nome personalizzato."""
+    try:
+        part_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
+        if os.path.exists(part_path):
+            with open(part_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                for cli in data.get("clienti", []):
+                    tel_reg = cli.get("telefono", "").replace(" ", "").replace("+", "")
+                    if tel_reg and (phone_number in tel_reg or tel_reg in phone_number):
+                        nome_cli = cli.get("nome_cliente", "").strip()
+                        if nome_cli:
+                            return nome_cli
+    except Exception:
+        pass
+    return ""
+
+def _estrai_nome_contatto(msg: dict, phone_number: str) -> str:
+    """Cerca di estrarre un nome sensato da WhatsApp, ignorando finti nomi e numeri duplicati."""
+    name = msg.get("contactName") or msg.get("verifiedName") or msg.get("pushName") or msg.get("name") or ""
+    name = str(name).strip()
+    
+    clean_name = name.replace("+", "").replace(" ", "")
+    if clean_name == phone_number or clean_name == phone_number.lstrip("39"):
+        return ""
+        
+    if name.lower() in ["cliente whatsapp", "wa user", "whatsapp"]:
+        return ""
+        
+    return name
+
+def _forza_ricerca_nome_evolution(remote_jid: str, phone_number: str) -> str:
+    """Se il messaggio non contiene il nome, interroga aggressivamente la rubrica di Evolution API."""
+    try:
+        res = requests.post(
+            f"{EVOLUTION_URL}/chat/findContacts/{INSTANCE_NAME}", 
+            json={"where": {"id": remote_jid}}, 
+            headers=_req_headers(), 
+            timeout=5
+        )
+        if res.status_code == 200:
+            dati = res.json()
+            records = dati if isinstance(dati, list) else dati.get("records", [])
+            for contatto in records:
+                nome = contatto.get("name") or contatto.get("pushName") or contatto.get("verifiedName") or ""
+                nome_pulito = str(nome).strip()
+                if nome_pulito and nome_pulito.replace("+", "").replace(" ", "") != phone_number:
+                    return nome_pulito
+    except Exception:
+        pass
+    return ""
+
 def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
-    """
-    Normalizza le diverse forme in cui Evolution API (a seconda della
-    versione) può restituire una lista paginata:
-      - lista diretta:                 [...]
-      - {"records": [...]}
-      - {chiave: [...]}                 es. {"messages": [...]}
-      - {chiave: {"records": [...]}}    es. {"messages": {"records": [...]}}
-    Ritorna sempre una list (eventualmente vuota).
-    """
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
@@ -250,9 +231,7 @@ def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
             return data["records"]
     return []
 
-
 async def sincronizza_chat_recenti_background():
-    """Interroga Evolution API per prendere le chat recenti e capire perché i messaggi vengono scartati."""
     await asyncio.sleep(3)
     add_whatsapp_log("📥 Avvio sincronizzazione automatica delle chat recenti (ultimi 2 giorni)...", "INFO")
     
@@ -265,7 +244,6 @@ async def sincronizza_chat_recenti_background():
 
         chats_raw = res.json()
         chats = _estrai_lista_evolution(chats_raw, "chats")
-        add_whatsapp_log(f"🔎 findChats: {len(chats)} chat individuate.", "INFO")
         if not chats:
             return
 
@@ -291,12 +269,9 @@ async def sincronizza_chat_recenti_background():
             if not messages:
                 continue
 
-            add_whatsapp_log(f"🔎 findMessages {remote_jid}: {len(messages)} messaggi nella chat.", "INFO")
-
             for msg in messages:
                 try:
                     if msg.get("key", {}).get("fromMe") == True:
-                        print(f"⏭️ SCARTATO ({remote_jid}): Messaggio inviato da te (fromMe)")
                         continue
 
                     timestamp_raw = msg.get("messageTimestamp", 0)
@@ -306,7 +281,6 @@ async def sincronizza_chat_recenti_background():
                         timestamp = 0
 
                     if timestamp < two_days_ago_timestamp:
-                        print(f"⏭️ SCARTATO ({remote_jid}): Troppo vecchio (> 48h)")
                         continue 
 
                     msg_id = msg.get("key", {}).get("id", "")
@@ -327,23 +301,29 @@ async def sincronizza_chat_recenti_background():
                         testo = msg_content["imageMessage"].get("caption", "Immagine")
 
                     if not testo and not is_vocal:
-                        print(f"⏭️ SCARTATO ({remote_jid}): Nessun testo o vocale (notifica di sistema)")
                         continue
 
-                    push_name = msg.get("pushName", "")
+                    # RICOSTRUZIONE NOME SUPER-INTELLIGENTE
                     phone_number = remote_jid.split("@")[0]
-                    mittente = f"{push_name} (+{phone_number})" if push_name else f"+{phone_number}"
+                    nome_finale = _trova_nome_in_rubrica_locale(phone_number)
+                    
+                    if not nome_finale:
+                        nome_finale = _estrai_nome_contatto(msg, phone_number)
+                        
+                    if not nome_finale:
+                        nome_finale = _forza_ricerca_nome_evolution(remote_jid, phone_number)
+                        
+                    # Se non lo trova neanche così, mette solo il numero, rimuovendo la fastidiosa parola "Cliente"
+                    mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
 
                     data_ricezione_custom = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') if timestamp else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
                     if not is_vocal and await ordine_esiste_in_db(mittente, testo, None):
-                        print(f"⏭️ SCARTATO ({remote_jid}): Messaggio già presente nel Database SQLite")
                         messaggi_processati.add(msg_id)
                         continue
 
                     messaggi_processati.add(msg_id)
                     processed_count += 1
-                    print(f"✅ ACCETTATO! Analizzo: {testo[:30]}...")
 
                     asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom))
                     await asyncio.sleep(0.5)
@@ -357,20 +337,15 @@ async def sincronizza_chat_recenti_background():
         add_whatsapp_log(f"⚠️ Errore durante la sincronizzazione delle chat recenti: {e}", "WARN")
 
 async def elabora_webhook_evolution(payload: dict):
-    """
-    Interpreta qualsiasi tipo di payload inviato da Evolution API (sia globale che per evento).
-    """
     event = payload.get("event")
     data_payload = payload.get("data", {})
 
-    # Se l'evento non è nel root ma il payload ha la struttura di un messaggio
     if not event:
         if "message" in payload or "messages" in payload or "key" in payload:
             event = "messages.upsert"
             if not data_payload and ("message" in payload or "key" in payload):
                 data_payload = payload
 
-    # Gestione QR Code
     if event == "qrcode.updated":
         qr_data = data_payload.get("qrcode", {}).get("base64", "")
         if qr_data:
@@ -379,7 +354,6 @@ async def elabora_webhook_evolution(payload: dict):
             add_whatsapp_log("📷 Nuovo QR Code generato.", "INFO")
         return
 
-    # Gestione Connessione
     if event == "connection.update":
         state = data_payload.get("state")
         if state == "open":
@@ -387,11 +361,6 @@ async def elabora_webhook_evolution(payload: dict):
             WHATSAPP_STATE["qr_code_base64"] = None
             WHATSAPP_STATE["data_connessione"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             add_whatsapp_log("🟢 WHATSAPP BANCO CONNESSO ED ATTIVO VIA EVOLUTION!", "SUCCESS")
-            # 🩹 FIX: riconferma la config webhook e assicura che il loop
-            # periodico sia attivo anche quando la connessione avviene
-            # tramite scansione QR (senza passare da avvia_whatsapp()).
-            # Il loop stesso fa da sync immediata alla prima iterazione,
-            # quindi non serve più lanciare anche una sync separata qui.
             asyncio.create_task(_configura_webhook_evolution())
             avvia_loop_sincronizzazione_periodica()
         elif state == "close":
@@ -399,7 +368,6 @@ async def elabora_webhook_evolution(payload: dict):
             add_whatsapp_log("🛑 WhatsApp disconnesso.", "WARN")
         return
 
-    # Estrazione Messaggi in arrivo (MESSAGES_UPSERT)
     if event in ["messages.upsert", "MESSAGES_UPSERT"] or "message" in data_payload or "messages" in data_payload:
         messages = data_payload.get("messages", [])
         if not messages:
@@ -409,17 +377,25 @@ async def elabora_webhook_evolution(payload: dict):
             if not isinstance(msg, dict) or not msg.get("key"):
                 continue
 
-            # Ignora i messaggi inviati dal banco stesso
             if msg.get("key", {}).get("fromMe") == True:
                 continue
                 
             mittente_id = msg.get("key", {}).get("remoteJid", "")
             if "@g.us" in mittente_id:
-                continue # Salta i gruppi
+                continue
                 
-            push_name = msg.get("pushName", "Cliente WhatsApp")
+            # RICOSTRUZIONE NOME SUPER-INTELLIGENTE
             phone_number = mittente_id.split("@")[0]
-            mittente = f"{push_name} (+{phone_number})" if push_name else f"+{phone_number}"
+            nome_finale = _trova_nome_in_rubrica_locale(phone_number)
+            
+            if not nome_finale:
+                nome_finale = _estrai_nome_contatto(msg, phone_number)
+                
+            if not nome_finale:
+                nome_finale = _forza_ricerca_nome_evolution(mittente_id, phone_number)
+                
+            # Se non lo trova neanche così, mette solo il numero, rimuovendo "Cliente"
+            mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
             
             testo = ""
             is_vocal = False
@@ -454,6 +430,7 @@ async def elabora_webhook_evolution(payload: dict):
 
             add_whatsapp_log(f"📩 Messaggio catturato da {mittente}: {testo}", "INCOMING")
             asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom))
+
 def scarica_media_evolution(message_obj: dict) -> Optional[dict]:
     message_type = message_obj.get("messageType", "")
     if message_type not in ["audioMessage", "documentMessage"]:
@@ -484,7 +461,7 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
         if media_info and media_info.get("base64"):
             audio_data = media_info["base64"]
             mime_type = media_info["mimeType"]
-            add_whatsapp_log(f"⚡ Audio scaricato. Trascrizione Gemini in corso...", "AUDIO")
+            add_whatsapp_log(f"⚡ Audio scaricato. Trascrizione IA in corso...", "AUDIO")
 
     storico_di_oggi = await get_storico_oggi(mittente)
     dt_msg = datetime.strptime(data_ricezione_custom, '%Y-%m-%d %H:%M:%S')
@@ -541,8 +518,7 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
         add_whatsapp_log(f"ℹ️ Messaggio cortesia da {mittente}", "INFO")
 
 async def forzare_scansione_chat():
-    """Permette anche dalla dashboard di forzare manualmente il recupero delle chat recenti."""
     await _configura_webhook_evolution()
     asyncio.create_task(sincronizza_chat_recenti_background())
     avvia_loop_sincronizzazione_periodica()
-    return {"status": "ok", "message": "Sincronizzazione dello storico delle chat recenti avviata in background."}
+    return {"status": "ok", "message": "Sincronizzazione avviata."}
