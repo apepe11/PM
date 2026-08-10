@@ -1315,8 +1315,20 @@
       "ricotta_default": "",
       "mozzarella_default": "",
       "particolarita": "Cliente registrato automaticamente da WhatsApp il 2026-08-10. Note: Grazie",
-      "ultimo_ordine": "2026-08-10 18:44:21",
+      "ultimo_ordine": "2026-08-10 19:31:02",
       "storico_ordini_esempi": [
+        {
+          "data": "2026-08-10 19:31:02",
+          "messaggio_raw": "Anche una ricotta da 500 gr. Grazie",
+          "traduzione_ia": [
+            {
+              "codice_articolo": "RICOTPE",
+              "nome_articolo": "ricotta PETRUZZI",
+              "quantita": 0.5,
+              "unita_di_misura": "kg"
+            }
+          ]
+        },
         {
           "data": "2026-08-10 18:44:21",
           "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera, 1 chilo di mozzarelle e 4 spicchi di caciocavallo. Grazie\"",

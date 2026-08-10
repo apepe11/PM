@@ -18,3 +18,5 @@ __pycache__/
 
 # Cartella della sessione di WhatsApp (per evitare di caricare token e IndexedDB)
 whatsapp_session/
+
+docker-compose.yml
