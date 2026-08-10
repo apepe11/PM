@@ -32,8 +32,8 @@ from backend.db import (
     elimina_broadcast_log,
     rielabora_tutti_ordini,
     svuota_database_ordini,
-    get_data_attiva,         # <--- NUOVO IMPORT
-    avanza_data_attiva,      # <--- NUOVO IMPORT
+    get_data_attiva,
+    avanza_data_attiva,
     DB_FILE
 )
 
@@ -94,25 +94,17 @@ def status():
         "ai": "Groq API (Llama 3.3)"
     }
 
-# -----------------------------------------------------
-# ROTTE DELLA DATA ATTIVA DI PRODUZIONE
-# -----------------------------------------------------
 @app.get("/api/data-attiva")
 async def api_get_data_attiva():
-    """Restituisce la data di produzione in corso."""
     data = await get_data_attiva()
     return {"data_attiva": data}
 
 @app.post("/api/chiudi-produzione")
 async def api_chiudi_produzione():
-    """Scatta in avanti di un giorno (saltando la domenica) la data di ricezione."""
     nuova_data = await avanza_data_attiva()
     return {"status": "success", "nuova_data": nuova_data, "message": f"Ricezione ordini chiusa. Nuova data: {nuova_data}"}
 
 
-# -----------------------------------------------------
-# Rotte Connessione Banco WhatsApp (Evolution API)
-# -----------------------------------------------------
 @app.get("/api/whatsapp/status")
 def whatsapp_status_endpoint():
     return get_whatsapp_status()
@@ -145,7 +137,6 @@ async def whatsapp_rescan_endpoint():
 @app.post("/api/whatsapp/webhook")
 @app.post("/api/whatsapp/webhook/{subpath:path}")
 async def whatsapp_webhook(payload: dict = Body(...), subpath: Optional[str] = None):
-    print(f"🔥 PACCHETTO RICEVUTO DA DOCKER [subpath: {subpath}]")
     asyncio.create_task(elabora_webhook_evolution(payload))
     return {"status": "success"}
 
@@ -156,7 +147,6 @@ async def svuota_database_endpoint():
 
 @app.get("/api/ordini")
 async def list_ordini(data: Optional[str] = Query(None), scomponi_pezzi: bool = Query(False)):
-    # Adesso gestisce la logica di fallback sulla Data Attiva in autonomia
     return await get_tutti_ordini(data, scomponi_pezzi=scomponi_pezzi)
 
 @app.post("/api/ordini/rielabora-tutti")
@@ -172,7 +162,6 @@ async def unlock_confezionamento(id_ordine: int):
         raise HTTPException(status_code=404, detail="Ordine non trovato")
     return {"status": "success", "message": "Ordine sbloccato per modifiche."}
 
-# Rotte Broadcast & Notifiche Schedulate
 @app.get("/api/broadcast/liste")
 async def list_broadcast_liste():
     return await get_broadcast_liste()
@@ -354,11 +343,11 @@ async def download_pdf_ordini_confezionati_banco(data: Optional[str] = Query(Non
 async def list_clienti():
     return await get_lista_clienti_registrati()
 
+# --- MODIFICA FONDAMENTALE: L'API prende una lista di prodotti pesati ---
 @app.put("/api/ordini/{id_ordine}/confezione")
 async def update_confezionamento(id_ordine: int, payload: dict = Body(...)):
-    peso_reale = float(payload.get("peso_reale", 0.0))
-    numero_lotto = str(payload.get("numero_lotto", ""))
-    success = await aggiorna_confezionamento_ordine(id_ordine, peso_reale, numero_lotto)
+    prodotti = payload.get("prodotti", [])
+    success = await aggiorna_confezionamento_ordine(id_ordine, prodotti)
     if not success:
         raise HTTPException(status_code=404, detail="Ordine non trovato")
     return {"status": "success", "message": "Confezionamento registrato."}

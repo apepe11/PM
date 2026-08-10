@@ -165,35 +165,95 @@ async def reset_whatsapp_banco():
 # ---------------------------------------------------------
 # HELPER PER PULIZIA NOMI CONTATTI
 # ---------------------------------------------------------
+def _normalizza_telefono(numero: str) -> str:
+    """Riduce un numero alle sole cifre e alle ultime 9 (formato mobile IT senza prefisso),
+    così il confronto funziona indipendentemente da +, spazi, 0039, 39, zeri iniziali ecc."""
+    if not numero:
+        return ""
+    solo_cifre = re.sub(r"\D", "", str(numero))
+    # normalizza eventuale prefisso internazionale 0039 -> 39
+    if solo_cifre.startswith("0039"):
+        solo_cifre = solo_cifre[2:]
+    # tieni solo le ultime 9 cifre: è la parte stabile di un numero mobile italiano
+    # (funziona sia che il resto abbia il prefisso 39 sia che non ce l'abbia)
+    return solo_cifre[-9:] if len(solo_cifre) >= 9 else solo_cifre
+
+_RUBRICA_CACHE_PATH: Optional[str] = None
+
+def _trova_percorso_rubrica() -> Optional[str]:
+    """Cerca particolarita_clienti.json in tutte le posizioni plausibili, invece di
+    assumere ciecamente un unico percorso relativo che puo' rompersi se la struttura
+    delle cartelle cambia. Il risultato viene 'cachato' dopo il primo trovato."""
+    global _RUBRICA_CACHE_PATH
+    if _RUBRICA_CACHE_PATH and os.path.exists(_RUBRICA_CACHE_PATH):
+        return _RUBRICA_CACHE_PATH
+
+    qui = os.path.dirname(os.path.abspath(__file__))
+    candidati = [
+        os.path.join(qui, "..", "catalogo", "particolarita_clienti.json"),
+        os.path.join(qui, "catalogo", "particolarita_clienti.json"),
+        os.path.join(qui, "..", "..", "catalogo", "particolarita_clienti.json"),
+        os.path.join(os.getcwd(), "catalogo", "particolarita_clienti.json"),
+    ]
+    for c in candidati:
+        c_abs = os.path.abspath(c)
+        if os.path.exists(c_abs):
+            _RUBRICA_CACHE_PATH = c_abs
+            return c_abs
+
+    add_whatsapp_log(
+        f"⚠️ particolarita_clienti.json non trovato in nessuno dei percorsi attesi: {[os.path.abspath(c) for c in candidati]}",
+        "WARN"
+    )
+    return None
+
 def _trova_nome_in_rubrica_locale(phone_number: str) -> str:
     """Cerca il numero di telefono nel nostro database locale per usare il nome personalizzato."""
+    part_path = _trova_percorso_rubrica()
+    if not part_path:
+        return ""
+
     try:
-        part_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
-        if os.path.exists(part_path):
-            with open(part_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                for cli in data.get("clienti", []):
-                    tel_reg = cli.get("telefono", "").replace(" ", "").replace("+", "")
-                    if tel_reg and (phone_number in tel_reg or tel_reg in phone_number):
-                        nome_cli = cli.get("nome_cliente", "").strip()
-                        if nome_cli:
-                            return nome_cli
-    except Exception:
-        pass
+        with open(part_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        add_whatsapp_log(f"⚠️ Errore leggendo particolarita_clienti.json ({part_path}): {e}", "WARN")
+        return ""
+
+    target = _normalizza_telefono(phone_number)
+    if not target:
+        return ""
+
+    for cli in data.get("clienti", []):
+        # supporta sia "telefono" sia eventuali chiavi alternative usate nel file
+        tel_raw = cli.get("telefono") or cli.get("numero") or cli.get("cellulare") or ""
+        tel_norm = _normalizza_telefono(tel_raw)
+        if tel_norm and tel_norm == target:
+            nome_cli = (cli.get("nome_cliente") or cli.get("nome") or "").strip()
+            if nome_cli:
+                return nome_cli
+
+    add_whatsapp_log(
+        f"ℹ️ Numero {phone_number} non presente in particolarita_clienti.json (nessuna corrispondenza su {target}).",
+        "INFO"
+    )
     return ""
 
 def _estrai_nome_contatto(msg: dict, phone_number: str) -> str:
     """Cerca di estrarre un nome sensato da WhatsApp, ignorando finti nomi e numeri duplicati."""
     name = msg.get("contactName") or msg.get("verifiedName") or msg.get("pushName") or msg.get("name") or ""
     name = str(name).strip()
-    
-    clean_name = name.replace("+", "").replace(" ", "")
-    if clean_name == phone_number or clean_name == phone_number.lstrip("39"):
+
+    if not name:
         return ""
-        
+
+    clean_name = _normalizza_telefono(name)
+    if clean_name and clean_name == _normalizza_telefono(phone_number):
+        return ""
+
     if name.lower() in ["cliente whatsapp", "wa user", "whatsapp"]:
         return ""
-        
+
     return name
 
 def _forza_ricerca_nome_evolution(remote_jid: str, phone_number: str) -> str:
@@ -211,10 +271,13 @@ def _forza_ricerca_nome_evolution(remote_jid: str, phone_number: str) -> str:
             for contatto in records:
                 nome = contatto.get("name") or contatto.get("pushName") or contatto.get("verifiedName") or ""
                 nome_pulito = str(nome).strip()
-                if nome_pulito and nome_pulito.replace("+", "").replace(" ", "") != phone_number:
+                if nome_pulito and _normalizza_telefono(nome_pulito) != _normalizza_telefono(phone_number):
                     return nome_pulito
-    except Exception:
-        pass
+            add_whatsapp_log(f"ℹ️ Evolution API non ha un nome salvato per {remote_jid} (rubrica del telefono vuota per questo contatto).", "INFO")
+        else:
+            add_whatsapp_log(f"⚠️ findContacts su Evolution API ha risposto {res.status_code} per {remote_jid}.", "WARN")
+    except Exception as e:
+        add_whatsapp_log(f"⚠️ Errore chiamando findContacts su Evolution API: {e}", "WARN")
     return ""
 
 def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:

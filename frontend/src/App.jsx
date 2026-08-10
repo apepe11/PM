@@ -54,7 +54,8 @@ export default function App() {
   const fetchDashboardData = async () => {
     setIsRefreshing(true);
     try {
-      const resOrdini = await fetch(`${API_BASE}/ordini`);
+      // MODIFICA QUI: Aggiunto ?scomponi_pezzi=true per far esplodere gli articoli a peso variabile
+      const resOrdini = await fetch(`${API_BASE}/ordini?scomponi_pezzi=true`);
       if (resOrdini.ok) {
         const dataOrdini = await resOrdini.json();
         setOrdini(dataOrdini);
@@ -167,7 +168,6 @@ export default function App() {
     }
   };
 
-  // Funzione diretta: legge dal componente in linea senza modale
   const handleConfirmOrderInline = async (orderId, lotto, prodottiAggiornati) => {
     try {
       const res = await fetch(`${API_BASE}/ordini/${orderId}/conferma`, {

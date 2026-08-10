@@ -25,23 +25,20 @@ def parse_dati_estratti_ia(dati_raw) -> dict:
             return {}
     return {}
 
-# --- NUOVA GESTIONE DATA ATTIVA (SOSTITUISCE L'OROLOGIO FISSO) ---
 async def get_data_attiva() -> str:
-    """Legge la Data di Produzione attualmente in corso dal DB."""
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute("SELECT valore FROM impostazioni WHERE chiave = 'data_attiva'")
         row = await cursor.fetchone()
         if row:
             return row[0]
         else:
-            # Inizializzazione la prima volta che si lancia il sistema
             oggi = datetime.now()
             if oggi.hour >= 8:
                 data_calc = oggi + timedelta(days=1)
             else:
                 data_calc = oggi
             
-            if data_calc.weekday() == 6: # Domenica -> Lunedì
+            if data_calc.weekday() == 6: 
                 data_calc += timedelta(days=1)
             
             data_str = data_calc.strftime('%Y-%m-%d')
@@ -50,12 +47,11 @@ async def get_data_attiva() -> str:
             return data_str
 
 async def avanza_data_attiva() -> str:
-    """Slitta la Data di Produzione in avanti di un giorno utile e la salva."""
     corrente_str = await get_data_attiva()
     corrente_dt = datetime.strptime(corrente_str, '%Y-%m-%d')
     
     nuova_dt = corrente_dt + timedelta(days=1)
-    if nuova_dt.weekday() == 6: # Salta la domenica
+    if nuova_dt.weekday() == 6: 
         nuova_dt += timedelta(days=1)
         
     nuova_str = nuova_dt.strftime('%Y-%m-%d')
@@ -66,9 +62,7 @@ async def avanza_data_attiva() -> str:
         
     return nuova_str
 
-
 async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = None) -> Optional[str]:
-    """Normalizza la data e, se assente, assegna automaticamente la Data Attiva."""
     if data_consegna is not None:
         if isinstance(data_consegna, datetime):
             return data_consegna.strftime('%Y-%m-%d')
@@ -275,9 +269,7 @@ async def init_db():
         """)
         await db.commit()
         
-        # Forza la creazione della data attiva se non esiste
         await get_data_attiva()
-        
         print("🗄️ Database Locale SQLite pronto.")
 
 async def get_storico_oggi(mittente: str) -> str:
@@ -331,10 +323,8 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
 
             if norm_nuovo in norm_storico:
                 testo_combinato = storico_precedente
-                print("🚫 [ANTI-LOOP]: Messaggio ignorato perché già presente nello storico.")
             elif norm_storico in norm_nuovo:
                 testo_combinato = nuovo_messaggio
-                print("🚫 [ANTI-LOOP]: Il nuovo messaggio contiene già il vecchio, aggiorno senza duplicare.")
             else:
                 testo_combinato = f"{storico_precedente}\n[Integrazione/Correzione]: {nuovo_messaggio}"
             
@@ -356,7 +346,6 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
         except Exception:
             pass   
 
-
 def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
     if not nome_o_codice:
         return 0.0
@@ -376,7 +365,8 @@ def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
             pass
     return 0.0
 
-async def aggiorna_confezionamento_ordine(id_ordine: int, peso_reale: float, numero_lotto: str):
+# --- MODIFICA FONDAMENTALE: Accetta lista prodotti invece di un peso globale ---
+async def aggiorna_confezionamento_ordine(id_ordine: int, prodotti_aggiornati: list):
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
@@ -386,16 +376,26 @@ async def aggiorna_confezionamento_ordine(id_ordine: int, peso_reale: float, num
         dati_raw = row[0]
         dati_parsed = parse_dati_estratti_ia(dati_raw)
 
-        lotto_clean = numero_lotto.upper().strip()
-        dati_parsed["peso_reale"] = round(peso_reale, 2)
-        dati_parsed["numero_lotto"] = lotto_clean
+        # Calcola peso reale totale sommando tutte le grammature non fisse
+        peso_totale = 0.0
+        lotto_generico = ""
+        for p in prodotti_aggiornati:
+            if not p.get("is_peso_fisso"):
+                try:
+                    # Estrae il numero (es. "0.500 KG" -> 0.5)
+                    g_str = str(p.get("grammatura", "0")).replace(',', '.').replace('KG', '').replace('kg', '').strip()
+                    peso_totale += float(g_str)
+                except ValueError:
+                    pass
+            if p.get("numero_lotto") and not lotto_generico:
+                lotto_generico = p.get("numero_lotto")
+
+        dati_parsed["prodotti"] = prodotti_aggiornati
+        dati_parsed["peso_reale"] = round(peso_totale, 3)
+        dati_parsed["numero_lotto"] = lotto_generico
         dati_parsed["stato_confezionamento"] = "CONFEZIONATO"
         dati_parsed["stato_ordine"] = "CONFERMATO"
         dati_parsed["data_conferma"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        for p in dati_parsed.get("prodotti", []):
-            if not p.get("numero_lotto"):
-                p["numero_lotto"] = lotto_clean
 
         await db.execute(
             "UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?",
@@ -417,6 +417,7 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
         lotto_default = (numero_lotto or dati_parsed.get("numero_lotto") or f"L{datetime.now().strftime('%y%m%d')}").strip().upper()
         prodotti_attuali = prodotti if prodotti is not None else (dati_parsed.get("prodotti") or [])
             
+        peso_totale = 0.0
         for p in prodotti_attuali:
             cod = p.get("codice_articolo", "")
             nome = p.get("nome_articolo", "") or cod
@@ -433,8 +434,18 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
                 p["is_peso_fisso"] = False
                 if not p.get("grammatura") or str(p.get("grammatura")).strip() == "":
                     p["grammatura"] = f"{p.get('quantita', 1.0)} {p.get('unita_di_misura', 'kg')}"
+                
+                # Somma al peso totale
+                try:
+                    g_str = str(p.get("grammatura", "0")).replace(',', '.').replace('KG', '').replace('kg', '').strip()
+                    peso_totale += float(g_str)
+                except ValueError:
+                    pass
 
         dati_parsed["prodotti"] = prodotti_attuali
+        if peso_totale > 0:
+            dati_parsed["peso_reale"] = round(peso_totale, 3)
+            
         dati_parsed["stato_ordine"] = "CONFERMATO"
         dati_parsed["numero_lotto"] = lotto_default
         dati_parsed["data_conferma"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -454,7 +465,33 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
             pass
 
         return True
-    
+
+def scomponi_prodotti_pezzi(prodotti: list) -> list:
+    prodotti_scomposti = []
+    for p in prodotti:
+        um = (p.get("unita_di_misura") or "kg").lower()
+        try:
+            qta = float(p.get("quantita", 1.0))
+        except (ValueError, TypeError):
+            qta = 1.0
+        
+        # Scompone in singoli pezzi se l'unità è in pezzi e > 1
+        if um in ["pezzi", "pz"] and 1 < qta <= 100 and qta.is_integer():
+            count = int(qta)
+            base_name = p.get("nome_articolo") or p.get("codice_articolo") or "Prodotto"
+            for i in range(count):
+                single_item = {**p}
+                single_item["quantita"] = 1.0
+                single_item["unita_di_misura"] = um
+                single_item["pezzo_index"] = i + 1
+                single_item["pezzi_totali"] = count
+                single_item["nome_articolo"] = f"{base_name} (Pezzo {i+1} di {count})"
+                prodotti_scomposti.append(single_item)
+        else:
+            prodotti_scomposti.append(p)
+            
+    return prodotti_scomposti
+
 async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bool = False):
     async with aiosqlite.connect(DB_FILE) as db:
         query = "SELECT id, mittente, testo_originale, dati_estratti_ia, data_ricezione FROM ordini ORDER BY data_ricezione DESC"
@@ -470,7 +507,6 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
             if not dati_parsed and dati_ia_raw:
                 dati_parsed = {"is_order": True, "prodotti": [], "note_ordine": str(dati_ia_raw)}
 
-            data_consegna = dati_parsed.get("data_consegna")
             data_consegna = await normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
             if not data_consegna:
                 data_consegna = await normalize_data_consegna(None, data_ric)
@@ -839,31 +875,6 @@ async def get_lista_clienti_registrati():
             clienti_set.add(r[0].strip())
 
     return sorted(list(clienti_set))
-
-def scomponi_prodotti_pezzi(prodotti: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    prodotti_scomposti: list[dict[str, Any]] = []
-    for p in prodotti:
-        um = (p.get("unita_di_misura") or "kg").lower()
-        try:
-            qta = float(p.get("quantita", 1.0))
-        except (ValueError, TypeError):
-            qta = 1.0
-        
-        if um in ["pezzi", "pz"] and 1 < qta <= 50 and qta.is_integer():
-            count = int(qta)
-            base_name = p.get("nome_articolo") or p.get("codice_articolo") or "Prodotto"
-            for i in range(count):
-                single_item: dict[str, Any] = {**p}
-                single_item["quantita"] = 1.0
-                single_item["unita_di_misura"] = um
-                single_item["pezzo_index"] = i + 1
-                single_item["pezzi_totali"] = count
-                single_item["nome_articolo"] = f"{base_name} (Pezzo {i+1} di {count})"
-                prodotti_scomposti.append(single_item)
-        else:
-            prodotti_scomposti.append(p)
-            
-    return prodotti_scomposti
 
 async def sblocca_ordine_confezionamento(id_ordine: int):
     async with aiosqlite.connect(DB_FILE) as db:
