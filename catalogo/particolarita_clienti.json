@@ -3,7 +3,36 @@
     "n": "Giuseppe",
     "rd": "RIC",
     "md": "FIOR DE LAT",
-    "p": "Ordina solitamente prodotti Senza Lattosio (Delat). • : Richiesta consegna per lunedì . 5 coppie di silani corrispondono a 10 pezzi di Silano Petruzzi. • : Consegna richiesta per lunedì (). Silani indicati in coppie (5 coppie = 10 pezzi). • : Richiesti 5 coppie di silani (10 pezzi totali) • : 5 coppie di silani (10 pezzi) • : 5 coppie di silani (10 kg totali) • : Consegna per lunedì. 5 coppie di silani (10 pezzi). • : 5 coppie di silani (10 pezzi da 1kg ciascuno) • : Consegna richiesta per lunedì."
+    "p": "Ordina solitamente prodotti Senza Lattosio (Delat). • : Richiesta consegna per lunedì . 5 coppie di silani corrispondono a 10 pezzi di Silano Petruzzi. • : Consegna richiesta per lunedì (). Silani indicati in coppie (5 coppie = 10 pezzi). • : Richiesti 5 coppie di silani (10 pezzi totali) • : 5 coppie di silani (10 pezzi) • : 5 coppie di silani (10 kg totali) • : Consegna per lunedì. 5 coppie di silani (10 pezzi). • : 5 coppie di silani (10 pezzi da 1kg ciascuno) • : Consegna richiesta per lunedì. • [Note 2026-08-11]: [Parser Locale di Riserva] Maio n 3 Petruzzella 250",
+    "t": "+393406754366",
+    "ultimo_ordine": "2026-08-11 20:25:09",
+    "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 20:25:09",
+        "messaggio_raw": "Maio n 3 Petruzzella 250",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "PETRZ0250PE",
+            "nome_articolo": "Petruzzella 0,250KG PETRUZZI",
+            "quantita": 3.0,
+            "unita_di_misura": "pezzi"
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 20:22:10",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Delizia\n4conf di tagliata 250\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "TAGJU0250PE",
+            "nome_articolo": "Fior di latte alla julienne 0,250KG PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "kg",
+            "grammatura": "0,250kg"
+          }
+        ]
+      }
+    ]
   },
   {
     "n": "Sole 365",
@@ -13,33 +42,155 @@
   {
     "n": "Andrea Aliandro",
     "t": "+393334695153",
-    "p": "Titolare del Caseificio Petruzzi. Gli ordini inviati da Andrea Aliandro hanno priorità alta ed appartengono alla produzione interna. • : Mozz delatt. N4 Scamorze. N4 • : Ordine Mozz. N7 Nodini. N6 Mozzdelatt. N7 Scamorze. N8 Scam delatt. N4 Ricotta.  N4 Ricotta delatt.  N2 • : Ordine interno • : Pergola",
-    "ultimo_ordine": "2026-08-11 15:04:14",
+    "p": "Titolare del Caseificio Petruzzi. Gli ordini inviati da Andrea Aliandro hanno priorità alta ed appartengono alla produzione interna. • : Mozz delatt. N4 Scamorze. N4 • : Ordine Mozz. N7 Nodini. N6 Mozzdelatt. N7 Scamorze. N8 Scam delatt. N4 Ricotta.  N4 Ricotta delatt.  N2 • : Ordine interno • : Pergola • [Note 2026-08-11]: [Parser Locale di Riserva] n4 julienne 3 kg, 1kg stracciatella, 1 silano • [Note 2026-08-11]: [Parser Locale di Riserva] per dopodomani , n4 julienne 3 kg, 1kg stracciatella, 1 silano • [Note 2026-08-11]: [Parser Locale di Riserva] Conad, 12.08.26, ordine\n3 petruzzella da kg\n10 vaschette 250\n3 coppie caciocavallo da 1 kg\n2 burratine \n2 stracciatella 250",
+    "ultimo_ordine": "2026-08-11 20:20:09",
     "storico_ordini_esempi": [
       {
-        "data": "2026-08-11 15:04:14",
-        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Taste, 13.08.26, ordine N 12 caciocavallo N 6 cacio silano dop\"",
+        "data": "2026-08-11 20:20:09",
+        "messaggio_raw": "Conad, 12.08.26, ordine\n3 petruzzella da kg\n10 vaschette 250\n3 coppie caciocavallo da 1 kg\n2 burratine \n2 stracciatella 250",
         "traduzione_ia": [
+          {
+            "codice_articolo": "PETRZ0250PE",
+            "nome_articolo": "Petruzzella 0,250KG PETRUZZI",
+            "quantita": 3.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "BOC0250PE",
+            "nome_articolo": "Bocconcini 0,250KG PETRUZZI",
+            "quantita": 10.0,
+            "unita_di_misura": "pezzi"
+          },
           {
             "codice_articolo": "CACBIPE",
             "nome_articolo": "Caciocavallo PETRUZZI",
-            "quantita": 12,
-            "unita_di_misura": "pezzi",
+            "quantita": 6.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "TAGJU3000PE",
+            "nome_articolo": "Fior di latte alla julienne 3KG PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "BURRA0250PE",
+            "nome_articolo": "Burrata 0,250KG PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "STRTART",
+            "nome_articolo": "Stracciatella Tartufo",
+            "quantita": 2.0,
+            "unita_di_misura": "pezzi"
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 20:16:08",
+        "messaggio_raw": "per dopodomani , n4 julienne 3 kg, 1kg stracciatella, 1 silano",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "TAGJU3000PE",
+            "nome_articolo": "Fior di latte alla julienne 3KG PETRUZZI",
+            "quantita": 4.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "TAGJU3000PE",
+            "nome_articolo": "Fior di latte alla julienne 3KG PETRUZZI",
+            "quantita": 3.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "STRTART",
+            "nome_articolo": "Stracciatella Tartufo",
+            "quantita": 1.0,
+            "unita_di_misura": "kg"
+          },
+          {
+            "codice_articolo": "SILBIPE",
+            "nome_articolo": "Silano PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi"
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 20:12:07",
+        "messaggio_raw": "n4 julienne 3 kg, 1kg stracciatella, 1 silano",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "TAGJU3000PE",
+            "nome_articolo": "Fior di latte alla julienne 3KG PETRUZZI",
+            "quantita": 4.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "TAGJU3000PE",
+            "nome_articolo": "Fior di latte alla julienne 3KG PETRUZZI",
+            "quantita": 3.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "STRTART",
+            "nome_articolo": "Stracciatella Tartufo",
+            "quantita": 1.0,
+            "unita_di_misura": "kg"
+          },
+          {
+            "codice_articolo": "SILBIPE",
+            "nome_articolo": "Silano PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi"
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 20:09:08",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"n4 julienne 3 kg, 1kg stracciatella, 1 silano\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "TAGJU3000PE",
+            "nome_articolo": "Fior di latte alla julienne 3KG PETRUZZI",
+            "quantita": 3.0,
+            "unita_di_misura": "kg",
             "grammatura": ""
           },
           {
-            "codice_articolo": "CACSDPE",
-            "nome_articolo": "Caciocavallo Silano DOP PETRUZZI",
-            "quantita": 6,
+            "codice_articolo": "STRACPE",
+            "nome_articolo": "Stracciatella PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "SILBIPE",
+            "nome_articolo": "Silano PETRUZZI",
+            "quantita": 1.0,
             "unita_di_misura": "pezzi",
             "grammatura": ""
           }
         ]
       },
       {
-        "data": "2026-08-11 14:32:28",
-        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Pergola\"",
-        "traduzione_ia": []
+        "data": "2026-08-11 19:15:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Mozz delatt. N4 Scamorze. N4\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "MOZZDELAT",
+            "nome_articolo": "Mozzarella Delat",
+            "quantita": 4.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "SCAMORZE",
+            "nome_articolo": "Treccia di Scamorza Petruzzi",
+            "quantita": 4.0,
+            "unita_di_misura": "pezzi"
+          }
+        ]
       }
     ]
   },
@@ -138,7 +289,31 @@
   },
   {
     "n": "Marco Costantino 365 Sole",
-    "p": "Note: Cliente 365 Sole. Stracciatella mappata su STRACPE (sfusa 1kg come da regola cliente). Ricotta mappata su RICOTPE."
+    "p": "Note: Cliente 365 Sole. Stracciatella mappata su STRACPE (sfusa 1kg come da regola cliente). Ricotta mappata su RICOTPE. • [Note 2026-08-11]: Grazie",
+    "t": "+393284344912",
+    "ultimo_ordine": "2026-08-11 19:21:01",
+    "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 19:21:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Salve x giovedì 8 pz ricotta 1 pz caciocavallo Grazie\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "RIC",
+            "nome_articolo": "Delat ricotta",
+            "quantita": 8.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "CACBIPE",
+            "nome_articolo": "Caciocavallo PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          }
+        ]
+      }
+    ]
   },
   {
     "n": "Simona Maximall Sole365",
@@ -157,39 +332,40 @@
     "n": "+",
     "t": "393290229307",
     "p": "Note: vaschette miste • : Conad Marsico • : Per villa\nN2 bocc\nN2 scamorza • : Per Conad Marsico\nN1 Petruzzella da kg\nN8 scamorze\nKg 2 bocc • : Buongiorno costantino per domani \n3 stracciate\n12 pz ricotta • : 1 kg bocconcini \n1 kg nodini \n500g ciliegini\n500g di bufala \n1 vaschetta di mozzarelle no lattosio\n3 scamorze no lattosio\n1 scamorza crusco \n1 scamorza affumicata \n2 coppie di scamorza \n1 coppia di caciocavallo \n1 ricotta \n1 rioctta no lattosio \n1 stracciarella no lattosio\n2 burro • : Buonasera per lunedi \n4 kg stracciatella \n3 kg vaschette da 500gr tritato \n1 kg vaschette vaschette da 250gr tritato \n1 coppia di caciocavalli \n12 pz ricotta \nGrazie • : mezzo kg di ricotta, 3 kg di bocconcini , 2 canestrato • : N2 bocconcini, 3 caciocavalli , 28 scamorze al pistacchio • : Buonasera , questo è l ordine per il sole 365 di pontecagnano \n\n8 pz    di ricotta    \n1 stracciatella     \n2 coppie di scamorze bianche senza lattosio sottovuto \n2 coppie di scamorze senza lattosio sottovuoto \n \nGrazie mille \nBuon lavoro • : Buongiorno \n\n4kg stracciatella \n2kg ricotta \n1kg vaschetta fdl\n2kg julienne \n1 coppia caciocavallo \n\nGrazie • : Salve x lunedi \n2 k stracciatella \n8 pz ricotta \nGrazie • : Buongiorno \n2stracciatelle \n2 coppie di caciocavallo \n1,5 si ricotta \n6 scamorze affumicate • : Xké me ho 1 • : Comunicare al corriere che non lascia le vaschette • : 10 vaschette miste • : Pergola • : Ordine per il Sole 365 • : Comunicare al corriere di non lasciare le vaschette • : Conad Marsico Pergola • : Lunedñ • : Altrimenti sono obbligato a distruggerw, Xké me ho 1 • : Altrimenti sono obbligato a distruggerw Xké me ho 1 • : Nessun prodotto individuato nel testo/vocale. • : Correzione/Aggiunta: Xké me ho 1 • : Grazie scusatemi • : Salve se è possibile comunicare al corriere che consegna che nn mi lascia le vaschette • : Grazie scusatemi • : Salve se è possibile comunicare al corriere che consegna che nn mi lascia le vaschette • [Note 2026-08-11]: [Parser Locale di Riserva] Altrimenti sono obbligato a distruggerw • [Note 2026-08-11]: [Parser Locale di Riserva] Xké me ho 1 • [Note 2026-08-11]: [Parser Locale di Riserva] Salve se è possibile comunicare al corriere che consegna che nn mi lascia le vaschette • [Note 2026-08-11]: [Parser Locale di Riserva] Buonasera,6 filoni grazie",
-    "ultimo_ordine": "2026-08-11 14:59:31",
+    "ultimo_ordine": "2026-08-11 19:22:01",
     "storico_ordini_esempi": [
       {
-        "data": "2026-08-11 14:59:31",
-        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Altrimenti sono obbligato a distruggerw\"",
+        "data": "2026-08-11 19:22:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Xké me ho 1\"",
         "traduzione_ia": []
       },
       {
-        "data": "2026-08-11 14:34:02",
-        "messaggio_raw": "Buonasera,6 filoni grazie",
+        "data": "2026-08-11 19:13:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera,6 filoni grazie\"",
         "traduzione_ia": [
           {
             "codice_articolo": "FILMZPE",
             "nome_articolo": "Filone di mozzarella PETRUZZI",
             "quantita": 6.0,
-            "unita_di_misura": "pezzi"
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
           }
         ]
       },
       {
-        "data": "2026-08-11 14:33:53",
+        "data": "2026-08-11 19:12:01",
         "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"X oggi 3 e 2kg di ricotta grazie\"",
         "traduzione_ia": [
           {
-            "codice_articolo": "RICOTPE",
-            "nome_articolo": "ricotta PETRUZZI",
+            "codice_articolo": "RIC",
+            "nome_articolo": "Ricotta PETRUZZI",
             "quantita": 3.0,
-            "unita_di_misura": "kg",
+            "unita_di_misura": "pezzi",
             "grammatura": ""
           },
           {
-            "codice_articolo": "RICOTPE",
-            "nome_articolo": "ricotta PETRUZZI",
+            "codice_articolo": "RIC",
+            "nome_articolo": "Ricotta PETRUZZI",
             "quantita": 2.0,
             "unita_di_misura": "kg",
             "grammatura": ""
@@ -197,13 +373,13 @@
         ]
       },
       {
-        "data": "2026-08-11 14:33:52",
-        "messaggio_raw": "Salve se è possibile comunicare al corriere che consegna che nn mi lascia le vaschette",
+        "data": "2026-08-11 19:11:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buongiorno x domani cosa vi serve?\"",
         "traduzione_ia": []
       },
       {
-        "data": "2026-08-11 14:33:47",
-        "messaggio_raw": "Xké me ho 1",
+        "data": "2026-08-11 19:10:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Salve se è possibile comunicare al corriere che consegna che nn mi lascia le vaschette\"",
         "traduzione_ia": []
       }
     ]
@@ -374,8 +550,28 @@
     "n": "Anna",
     "t": "+393400921251",
     "p": "Note: Grazie • [Note 2026-08-11]: [Parser Locale di Riserva] Buonasera, 1 chilo di mozzarelle e 4 spicchi di caciocavallo. Grazie • [Note 2026-08-11]: [Parser Locale di Riserva] Buongiorno 2kdi ricotta\nUna stracciata",
-    "ultimo_ordine": "2026-08-11 14:54:31",
+    "ultimo_ordine": "2026-08-11 19:23:01",
     "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 19:23:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera 2 stracciatella, 1,5 di ricotta Grazie\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "STRACPE",
+            "nome_articolo": "Stracciatella PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "RIC",
+            "nome_articolo": "Delat ricotta",
+            "quantita": 1.5,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          }
+        ]
+      },
       {
         "data": "2026-08-11 14:54:31",
         "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera, 1 chilo di mozzarelle e 4 spicchi di caciocavallo. Grazie\"",
@@ -438,26 +634,6 @@
             "grammatura": "500 GR"
           }
         ]
-      },
-      {
-        "data": "2026-08-11 14:29:08",
-        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buongiorno 2kdi ricotta\nUna stracciata\"",
-        "traduzione_ia": [
-          {
-            "codice_articolo": "RIC300",
-            "nome_articolo": "Ricotta 300g",
-            "quantita": 2.0,
-            "unita_di_misura": "kg",
-            "grammatura": "300 GR"
-          },
-          {
-            "codice_articolo": "STRA20250PE",
-            "nome_articolo": "Stracciatella  0,250KG PETRUZZI",
-            "quantita": 0.25,
-            "unita_di_misura": "kg",
-            "grammatura": ""
-          }
-        ]
       }
     ]
   },
@@ -465,7 +641,7 @@
     "n": "Angela",
     "t": "+393488540043",
     "p": "• : Richiesta informazioni sulla prossima consegna • : La prossima consegna quanto è? • : Buonasera, 3 boccone da 500gr 3 boccone 250gr 1 coco cavallo 2 scamorza al crusco • : Buonasera nulla grazie \nLa prossima consegna quanto è? • [Note 2026-08-11]: [Parser Locale di Riserva] Buonasera nulla grazie \nLa prossima consegna quanto è? • [Note 2026-08-11]: [Parser Locale di Riserva] Buonasera, 3 boccone da 500gr 3 boccone 250gr 1 coco cavallo 2 scamorza al crusco • [Note 2026-08-11]: Nessun prodotto individuato nel testo/vocale.",
-    "ultimo_ordine": "2026-08-11 14:56:31",
+    "ultimo_ordine": "2026-08-11 19:19:01",
     "storico_ordini_esempi": [
       {
         "data": "2026-08-11 14:56:31",
@@ -548,7 +724,7 @@
     "n": "Cirigliano Donato",
     "t": "+393496615918",
     "p": "Note: 2 vaschette di mozzarelle da sostituire • : Sostituire 2 vaschette di mozzarelle • : Grazie • : Per sostituire 2 vaschette di mozzarelle • : 2 da sostituire • [Note 2026-08-11]: [Parser Locale di Riserva] Buonasera \nPer domani \n- 8 vaschette di mozzarelle da 250gr ( 2 da sostituire)\n- 6 vaschetta senza lattosio \n- 4 scamorze\n- 1 scamorzine olive \n- 2 caciocavalli \n- 2 caciocavalli silani \nGrazie",
-    "ultimo_ordine": "2026-08-11 14:51:31",
+    "ultimo_ordine": "2026-08-11 19:18:02",
     "storico_ordini_esempi": [
       {
         "data": "2026-08-11 14:51:31",
@@ -684,7 +860,7 @@
   {
     "n": "Marco Guerra (via Andrea)",
     "p": "[Note 2026-08-11]: [Parser Locale di Riserva] Ordine Marco Guerra\nN 8 trecce confezionate \nN 6 caciocavallo",
-    "ultimo_ordine": "2026-08-11 15:06:14",
+    "ultimo_ordine": "2026-08-11 19:16:01",
     "storico_ordini_esempi": [
       {
         "data": "2026-08-11 14:48:31",
@@ -763,9 +939,45 @@
   {
     "n": "Simy",
     "t": "+109324198256762",
-    "p": "Note: Richiesta informazioni sullo scarico • : Richiesta di chiarimento su mancato scarico • [Note 2026-08-11]: [Parser Locale di Riserva] Buonasera volevo chiedere come mai oggi non è stato effettuato lo scarico grazie mille buona serata",
-    "ultimo_ordine": "2026-08-11 14:31:02",
+    "p": "Note: Richiesta informazioni sullo scarico • : Richiesta di chiarimento su mancato scarico • [Note 2026-08-11]: [Parser Locale di Riserva] Buonasera volevo chiedere come mai oggi non è stato effettuato lo scarico grazie mille buona serata • [Note 2026-08-11]: Grazie mille \nBuon lavoro",
+    "ultimo_ordine": "2026-08-11 19:25:02",
     "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 19:25:02",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera , questo è l ordine per il sole 365 di pontecagnano \n10 pz di ricotta\n2 stracciatella \n3 coppie di scamorze bianche",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "RIC",
+            "nome_articolo": "Delat ricotta",
+            "quantita": 10.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "STRACPE",
+            "nome_articolo": "Stracciatella PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "SCABIPE",
+            "nome_articolo": "scamorza bianca PETRUZZI",
+            "quantita": 6.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "SCABIPE",
+            "nome_articolo": "scamorza bianca PETRUZZI",
+            "quantita": 6.0,
+            "unita_di_misura": "pezzi"
+          },
+          {
+            "codice_articolo": "SCACRPE",
+            "nome_articolo": "scamorza crusco PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "pezzi"
+          }
+        ]
+      },
       {
         "data": "2026-08-11 14:31:02",
         "messaggio_raw": "Buonasera volevo chiedere come mai oggi non è stato effettuato lo scarico grazie mille buona serata",
@@ -852,6 +1064,213 @@
             "nome_articolo": "Silano PETRUZZI",
             "quantita": 6.0,
             "unita_di_misura": "pezzi"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "n": "Conad Marsico (via Andrea)",
+    "t": "",
+    "rd": "",
+    "md": "",
+    "p": "Cliente registrato automaticamente da WhatsApp il 2026-08-11.",
+    "ultimo_ordine": "2026-08-11 19:24:01",
+    "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 19:24:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Conad Marsico, 22.08.26, ordine\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "PETRZ0250PE",
+            "nome_articolo": "Petruzzella 0,250KG PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "CACALPE",
+            "nome_articolo": "Caciocavallo Antica Latteria Lucana PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "n": "Carmine",
+    "t": "+393270507404",
+    "rd": "",
+    "md": "",
+    "p": "Cliente registrato automaticamente da WhatsApp il 2026-08-11.",
+    "ultimo_ordine": "2026-08-11 19:26:01",
+    "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 19:26:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Messaggio ricevuto da Carmine (+393270507404): \"4 vaschette di burrata\n2kg di stracciatella \n20 vaschette da 250 gr\n2kg di sc",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "BURPIST",
+            "nome_articolo": "Burrata al Pistacchio",
+            "quantita": 4.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "STRACPE",
+            "nome_articolo": "Stracciatella PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "NOD0250PE",
+            "nome_articolo": "Nodini 0,250KG PETRUZZI",
+            "quantita": 5.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "SCAPIPE",
+            "nome_articolo": "Scamorza Pistacchio PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "SCAPIPC",
+            "nome_articolo": "Scamorza Pistacchio PETRUZZI Conf.",
+            "quantita": 1.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "n": "NAM Supermercati",
+    "t": "+393501883272",
+    "rd": "",
+    "md": "",
+    "p": "Cliente registrato automaticamente da WhatsApp il 2026-08-11.",
+    "ultimo_ordine": "2026-08-11 19:32:01",
+    "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 19:32:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Messaggio ricevuto da NAM Supermercati (+393501883272): \"1 coppia caciocavallo semiastagion\"\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "CACSAPE",
+            "nome_articolo": "Caciocavallo al salame PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 19:31:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"1 ricotta\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "RIC",
+            "nome_articolo": "Delat ricotta",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 19:30:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"1 petruzzella\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "PETRZ0250PE",
+            "nome_articolo": "Petruzzella 0,250KG PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 19:29:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"1 coppia scamorza\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "SCAPIPE",
+            "nome_articolo": "Scamorza Pistacchio PETRUZZI",
+            "quantita": 1.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          }
+        ]
+      },
+      {
+        "data": "2026-08-11 19:28:01",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"6 da 250gr\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "BURRA0250PE",
+            "nome_articolo": "Burrata 0,250KG PETRUZZI",
+            "quantita": 1.5,
+            "unita_di_misura": "kg",
+            "grammatura": "250gr"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "n": "Conad (via Andrea)",
+    "t": "",
+    "rd": "",
+    "md": "",
+    "p": "Cliente registrato automaticamente da WhatsApp il 2026-08-11.",
+    "ultimo_ordine": "2026-08-11 20:16:09",
+    "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 20:01:03",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Conad, 12.08.26, ordine\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "PETRZ0250PE",
+            "nome_articolo": "Petruzzella 0,250KG PETRUZZI",
+            "quantita": 3.0,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "BURRA0250PE",
+            "nome_articolo": "Burrata 0,250KG PETRUZZI",
+            "quantita": 2.5,
+            "unita_di_misura": "kg",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "CACREPE",
+            "nome_articolo": "Caciocavallo Regalo PETRUZZI",
+            "quantita": 3.0,
+            "unita_di_misura": "coppie",
+            "grammatura": "1 kg"
+          },
+          {
+            "codice_articolo": "BURATPE",
+            "nome_articolo": "Burrata al TARTUFO PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "STRACPE",
+            "nome_articolo": "Stracciatella PETRUZZI",
+            "quantita": 2.0,
+            "unita_di_misura": "pezzi",
+            "grammatura": "250g"
           }
         ]
       }

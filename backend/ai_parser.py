@@ -173,14 +173,18 @@ class AIParser:
         return ""
 
     def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = "", message_timestamp: Optional[datetime] = None):
-        # 1. CATALOGO SUPER COMPATTO (Usa una stringa separata da pipe invece di un JSON)
+        if message_timestamp is None:
+            message_timestamp = datetime.now()
+
+        # CATALOGO SUPER COMPATTO MA SEMANTICO (Con Sinonimi ripristinati per evitare allucinazioni)
         cat_items = []
         for p in self.catalog:
             cod = p.get("c", "")
             nome = p.get("n", "")
+            syns = p.get("s", "")
             if cod and nome:
-                cat_items.append(f"{cod}:{nome}")
-        catalog_formatted = "|".join(cat_items)
+                cat_items.append(f"- [{cod}] {nome} (Sinonimi: {syns})")
+        catalog_formatted = "\n".join(cat_items)
 
         regole_cliente = self.get_specific_client_rules(client_name)
         campioni_block = f"\nCAMPIONI PRECEDENTI:\n{campioni_passati_str}\n" if campioni_passati_str else ""
@@ -192,31 +196,43 @@ class AIParser:
             "Estrai ogni cliente in un blocco JSON separato nell'array 'ordini', usando 'cliente_reale'."
         ) if is_andrea else ""
 
+        # Precalcoliamo date esatte in Python per blindare le logiche temporali dell'IA
+        msg_date_str = message_timestamp.strftime('%Y-%m-%d')
+        msg_time_str = message_timestamp.strftime('%H:%M:%S')
+        data_domani = (message_timestamp + timedelta(days=1)).strftime('%Y-%m-%d')
+        data_dopodomani = (message_timestamp + timedelta(days=2)).strftime('%Y-%m-%d')
+
         return f"""Sei l'IA Caseificio Petruzzi. Estrai l'ordine in JSON rigoroso.
         
-        DATA CONSEGNA: Se specificata usala, altrimenti usa {descrizione_slot}
-        REGOLE: {andrea_rule} Somma prodotti con STORICO. "is_cancelled":true se annullato. Note in "note_ordine".
+        🕒 CONTESTO TEMPORALE (FONDAMENTALE):
+        Il messaggio è stato inviato dal cliente OGGI: {msg_date_str} alle ore {msg_time_str}.
+        - Se il cliente scrive esplicitamente "per domani", la data di consegna E' TASSATIVAMENTE {data_domani}.
+        - Se il cliente scrive esplicitamente "per dopodomani", la data di consegna E' TASSATIVAMENTE {data_dopodomani}.
+        - Solo se il cliente NON specifica date, applica questa regola di default calcolata dal sistema: {descrizione_slot}
         
-        CATALOGO (Codice:Nome):
+        REGOLE: {andrea_rule} Somma prodotti con STORICO se richiesto. "is_cancelled":true se annullato interamente. Note o variazioni in "note_ordine".
+        
+        CATALOGO (Codice | Nome | Sinonimi):
         {catalog_formatted}
+        
         {regole_cliente}
         {campioni_block}
 
         MAPPATURA E GESTIONE RESI/SOSTITUZIONI (TASSATIVO): 
-        1. Usa ESATTAMENTE Codice e Nome dal catalogo. Sole 365 -> STRACPE sfusa.
-        2. Pezzi/vaschette/coppie -> "pezzi". Grammi sfusi -> "kg" (500g = 0.5kg). Specifica "grammatura" solo se formati speciali richiesti (es. 250gr).
-        3. GESTIONE RESI E CAMBI: Se il cliente segnala di voler rendere o cambiare parte della merce (es. "rendo 2 ricottine e le sostituisco con 2 fresche" oppure "1kg è da cambiare"), calcola SEMPRE e SOLO il saldo netto finale dei prodotti da consegnare. NON duplicare mai le voci e non inserire i resi come quantità positive aggiuntive. Riassumi i dettagli testuali del cambio nel campo "note_ordine".
+        1. Trova il prodotto corretto cercando tra i Sinonimi (es: "vaschette di mozzarella" = Fior di Latte o simili). Usa ESATTAMENTE Codice e Nome dal catalogo. 
+        2. Pezzi/vaschette/coppie -> "unita_di_misura": "pezzi". Grammi/Chili sfusi -> "unita_di_misura": "kg" (500g = 0.5kg). Specifica "grammatura" solo se formati speciali richiesti (es. "250gr").
+        3. GESTIONE RESI E CAMBI: Se il cliente segnala di voler rendere o cambiare parte della merce, calcola SEMPRE e SOLO il saldo netto finale dei prodotti da consegnare in "prodotti". Le istruzioni sul reso vanno scritte SOLO in "note_ordine" senza duplicare i prodotti o generare quantità fittizie.
 
         SCHEMA JSON DA RISPETTARE:
         {{
-        "testo_trascritto": "...",
+        "testo_trascritto": "trascrizione vocale o stringa vuota",
         "ordini": [{{
             "is_order": true,
             "is_cancelled": false,
             "data_consegna": "YYYY-MM-DD",
             "cliente_reale": "nome o null",
             "prodotti": [{{"codice_articolo": "COD", "nome_articolo": "NOME", "quantita": 1.0, "unita_di_misura": "pezzi/kg", "grammatura": ""}}],
-            "note_ordine": "...",
+            "note_ordine": "eventuali note su resi o specifiche",
             "da_verificare_manualmente": false
         }}]
         }}"""

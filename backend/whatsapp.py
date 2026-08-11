@@ -28,6 +28,16 @@ DB_WRITE_LOCK = asyncio.Lock()
 ai_parser = AIParser(base_dir="catalogo")
 messaggi_processati = set()
 
+# ---------------------------------------------------------
+# 📦 DEBOUNCING MESSAGGI "A RATE"
+# ---------------------------------------------------------
+# Se un cliente scrive più messaggi in rapida successione (es. un
+# prodotto per messaggio), li raggruppiamo in un unico buffer per
+# cliente e li inviamo all'IA come un unico testo solo quando il
+# cliente smette di scrivere per DEBOUNCE_SECONDS secondi.
+DEBOUNCE_SECONDS = float(os.environ.get("WHATSAPP_DEBOUNCE_SECONDS", "12"))
+message_buffers: dict = {}  # mittente -> {"testi": [...], "msg_raw": ..., "data_ricezione_custom": ..., "timer_task": Task}
+
 WHATSAPP_STATE = {
     "stato_connessione": "DISCONNESSO", 
     "qr_code_base64": None,
@@ -500,7 +510,7 @@ async def elabora_webhook_evolution(payload: dict):
                 messaggi_processati.add(chiave_univoca)
 
             add_whatsapp_log(f"📩 Messaggio catturato da {mittente}: {testo}", "INCOMING")
-            asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom))
+            asyncio.create_task(_accoda_messaggio_utente(mittente, testo, is_vocal, msg, data_ricezione_custom))
 
 def scarica_media_evolution(message_obj: dict) -> Optional[dict]:
     message_type = message_obj.get("messageType", "")
@@ -520,6 +530,91 @@ def scarica_media_evolution(message_obj: dict) -> Optional[dict]:
         add_whatsapp_log(f"⚠️ Errore download media da Evolution: {e}", "ERROR")
     return None
 
+def _is_titolare_andrea(mittente: str) -> bool:
+    """
+    Riconosce i messaggi del Titolare (Andrea), che inoltra ordini GIA' COMPLETI
+    e distinti (uno per cliente) messaggio per messaggio: NON vanno mai bufferizzati
+    insieme, altrimenti l'IA li fonde in un unico ordine "integrato" invece di
+    trattarli come ordini separati per (nome, data, ordine).
+    """
+    m = (mittente or "").lower()
+    return "3334695153" in m or "224257489502407" in m or "andrea aliandro" in m
+
+
+async def _accoda_messaggio_utente(mittente: str, testo: str, is_vocal: bool, msg_raw: dict, data_ricezione_custom: str):
+    """
+    Punto di ingresso "smart" per ogni messaggio in arrivo.
+    - I messaggi del Titolare (Andrea) NON vengono mai bufferizzati: ogni suo
+      messaggio è già un ordine completo e autonomo per un cliente specifico,
+      quindi va processato subito e singolarmente (come prima del debounce).
+    - I messaggi vocali NON vengono bufferizzati (portano audio da trascrivere
+      singolarmente): prima svuotiamo un eventuale buffer testuale pendente,
+      poi processiamo il vocale subito, come prima.
+    - I messaggi di testo dei clienti normali vengono accodati in un buffer per
+      cliente e processati tutti insieme quando il cliente smette di scrivere.
+    """
+    if _is_titolare_andrea(mittente):
+        await _flush_buffer_utente(mittente, motivo="messaggio del Titolare: bypass buffer, ordine già completo")
+        asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg_raw, data_ricezione_custom))
+        return
+
+    if is_vocal:
+        await _flush_buffer_utente(mittente, motivo="vocale in arrivo, forzo invio testo in sospeso")
+        asyncio.create_task(_processa_ordine_ia(mittente, testo, True, msg_raw, data_ricezione_custom))
+        return
+
+    buffer = message_buffers.get(mittente)
+    if buffer is None:
+        buffer = {
+            "testi": [],
+            "msg_raw": msg_raw,
+            "data_ricezione_custom": data_ricezione_custom,  # timestamp del PRIMO messaggio del gruppo
+            "timer_task": None,
+        }
+        message_buffers[mittente] = buffer
+
+    buffer["testi"].append(testo)
+    buffer["msg_raw"] = msg_raw  # per media/metadata teniamo comunque l'ultimo messaggio ricevuto
+
+    if buffer["timer_task"] and not buffer["timer_task"].done():
+        buffer["timer_task"].cancel()
+
+    buffer["timer_task"] = asyncio.create_task(_timer_debounce(mittente))
+    add_whatsapp_log(f"⏳ Messaggio di {mittente} accodato nel buffer ({len(buffer['testi'])} in coda, invio tra {DEBOUNCE_SECONDS:.0f}s se non arrivano altri).", "INFO")
+
+
+async def _timer_debounce(mittente: str):
+    try:
+        await asyncio.sleep(DEBOUNCE_SECONDS)
+    except asyncio.CancelledError:
+        return  # è arrivato un nuovo messaggio: il cronometro è stato azzerato altrove
+    await _flush_buffer_utente(mittente, motivo="timeout debounce raggiunto")
+
+
+async def _flush_buffer_utente(mittente: str, motivo: str = ""):
+    """Unisce tutti i messaggi accodati per il cliente e li invia in un'unica chiamata all'IA."""
+    buffer = message_buffers.pop(mittente, None)
+    if not buffer or not buffer["testi"]:
+        return
+
+    timer_task = buffer.get("timer_task")
+    if timer_task and not timer_task.done():
+        timer_task.cancel()
+
+    testo_unito = "\n".join(buffer["testi"])
+    n_msg = len(buffer["testi"])
+    if n_msg > 1:
+        add_whatsapp_log(f"📦 Buffer di {mittente} unito: {n_msg} messaggi -> 1 chiamata IA ({motivo}).", "SUCCESS")
+
+    asyncio.create_task(_processa_ordine_ia(
+        mittente,
+        testo_unito,
+        False,
+        buffer["msg_raw"],
+        buffer["data_ricezione_custom"],
+    ))
+
+
 async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw: dict, data_ricezione_custom: str):
     WHATSAPP_STATE["ultimo_messaggio"] = f"{mittente} - {'🎙️ Vocale' if is_vocal else testo}"
     
@@ -534,7 +629,7 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
             mime_type = media_info["mimeType"]
             add_whatsapp_log(f"⚡ Audio scaricato. Trascrizione IA in corso...", "AUDIO")
 
-    is_andrea_mittente = "3334695153" in (mittente or "")
+    is_andrea_mittente = _is_titolare_andrea(mittente)
     storico_di_oggi = "" if is_andrea_mittente else await get_storico_oggi(mittente)
     dt_msg = datetime.strptime(data_ricezione_custom, '%Y-%m-%d %H:%M:%S')
 
