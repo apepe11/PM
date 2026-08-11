@@ -147,7 +147,14 @@ async def svuota_database_endpoint():
 
 @app.get("/api/ordini")
 async def list_ordini(data: Optional[str] = Query(None), scomponi_pezzi: bool = Query(False)):
-    return await get_tutti_ordini(data, scomponi_pezzi=scomponi_pezzi)
+    # Di default NON include i messaggi non riconosciuti come ordine (0 prodotti,
+    # non annullati) - vedi /api/ordini/da-verificare per quelli.
+    return await get_tutti_ordini(data, scomponi_pezzi=scomponi_pezzi, includi_non_ordini=False)
+
+@app.get("/api/ordini/da-verificare")
+async def list_ordini_da_verificare(data: Optional[str] = Query(None)):
+    tutti = await get_tutti_ordini(data, includi_non_ordini=True)
+    return [o for o in tutti if not o.get("is_order", True) and not o.get("is_cancelled") and len(o.get("prodotti", [])) == 0]
 
 @app.post("/api/ordini/rielabora-tutti")
 @app.get("/api/ordini/rielabora-tutti")

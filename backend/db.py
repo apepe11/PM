@@ -25,8 +25,15 @@ def parse_dati_estratti_ia(dati_raw) -> dict:
             return {}
     return {}
 
+# -------------------------------------------------------------------
+# FIX DEFINITIVO: DB CONNECTION HELPER WITH TIMEOUT
+# -------------------------------------------------------------------
+def get_db_connection():
+    """Ritorna la connessione ad aiosqlite con un timeout maggiorato."""
+    return aiosqlite.connect(DB_FILE, timeout=30.0)
+
 async def get_data_attiva() -> str:
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT valore FROM impostazioni WHERE chiave = 'data_attiva'")
         row = await cursor.fetchone()
         if row:
@@ -56,7 +63,7 @@ async def avanza_data_attiva() -> str:
         
     nuova_str = nuova_dt.strftime('%Y-%m-%d')
     
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute("UPDATE impostazioni SET valore = ? WHERE chiave = 'data_attiva'", (nuova_str,))
         await db.commit()
         
@@ -148,18 +155,20 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
             nome_solo = clean_mittente
 
     try:
-        data_json = {"clienti": []}
+        lista_clienti = []
         if os.path.exists(PARTICOLARITA_FILE):
             with open(PARTICOLARITA_FILE, 'r', encoding='utf-8') as f:
-                data_json = json.load(f)
-
-        lista_clienti = data_json.get("clienti", [])
+                data = json.load(f)
+                if isinstance(data, list):
+                    lista_clienti = data
         
         found_client = None
         nome_solo_lower = nome_solo.lower()
+        
         for cli in lista_clienti:
-            n_reg = cli.get("nome_cliente", "").strip().lower()
-            t_reg = cli.get("telefono", "").strip()
+            n_reg = (cli.get("n") or cli.get("nome_cliente") or "").strip().lower()
+            t_reg = (cli.get("t") or cli.get("telefono") or "").strip()
+            
             if (n_reg and (n_reg in nome_solo_lower or nome_solo_lower in n_reg)) or (phone_number and t_reg and phone_number.replace(" ", "") in t_reg.replace(" ", "")):
                 found_client = cli
                 break
@@ -174,15 +183,15 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
         note_ext = (dati_ia.get("note_ordine") or "").strip()
 
         if found_client:
-            if phone_number and not found_client.get("telefono"):
-                found_client["telefono"] = phone_number
+            if phone_number and not found_client.get("t"):
+                found_client["t"] = phone_number
 
-            if note_ext and note_ext not in (found_client.get("particolarita") or ""):
-                curr_part = found_client.get("particolarita", "")
+            if note_ext and note_ext not in (found_client.get("p") or ""):
+                curr_part = found_client.get("p", "")
                 if curr_part:
-                    found_client["particolarita"] = f"{curr_part} • [Note {now_str[:10]}]: {note_ext}"
+                    found_client["p"] = f"{curr_part} • [Note {now_str[:10]}]: {note_ext}"
                 else:
-                    found_client["particolarita"] = f"[Note {now_str[:10]}]: {note_ext}"
+                    found_client["p"] = f"[Note {now_str[:10]}]: {note_ext}"
 
             found_client["ultimo_ordine"] = now_str
             storico = found_client.setdefault("storico_ordini_esempi", [])
@@ -191,25 +200,27 @@ async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, 
                 found_client["storico_ordini_esempi"] = storico[:5]
         else:
             nuovo_cliente = {
-                "nome_cliente": nome_solo,
-                "telefono": phone_number,
-                "ricotta_default": "",
-                "mozzarella_default": "",
-                "particolarita": f"Cliente registrato automaticamente da WhatsApp il {now_str[:10]}." + (f" Note: {note_ext}" if note_ext else ""),
+                "n": nome_solo,
+                "t": phone_number,
+                "rd": "",
+                "md": "",
+                "p": f"Cliente registrato automaticamente da WhatsApp il {now_str[:10]}." + (f" Note: {note_ext}" if note_ext else ""),
                 "ultimo_ordine": now_str,
                 "storico_ordini_esempi": [nuovo_esempio]
             }
             lista_clienti.append(nuovo_cliente)
 
-        data_json["clienti"] = lista_clienti
-
         with open(PARTICOLARITA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data_json, f, indent=2, ensure_ascii=False)
+            json.dump(lista_clienti, f, indent=2, ensure_ascii=False)
+            
     except Exception as e:
         print(f"⚠️ Errore salvataggio particolarita_clienti.json: {e}")
-
 async def init_db():
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
+        # ABILITIAMO IL WAL PER AZZERARE I BLOCCHI (DATABASE IS LOCKED)
+        await db.execute("PRAGMA journal_mode=WAL;")
+        await db.execute("PRAGMA synchronous=NORMAL;")
+        
         await db.execute("""
             CREATE TABLE IF NOT EXISTS impostazioni (
                 chiave TEXT PRIMARY KEY,
@@ -270,18 +281,18 @@ async def init_db():
         await db.commit()
         
         await get_data_attiva()
-        print("🗄️ Database Locale SQLite pronto.")
+        print("🗄️ Database Locale SQLite pronto con modalità Anti-Blocco (WAL) attiva.")
 
 async def get_storico_oggi(mittente: str) -> str:
     target_data_consegna = await get_data_attiva()
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         row = await _trova_ordine_esistente_per_data(db, mittente, target_data_consegna)
         if not row:
             return ""
         return row[1] 
 
 async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str] = None) -> bool:
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         clean_text = testo.replace("🎙️ [MESSAGGIO VOCALE]", "").strip()[:30]
         if not clean_text:
             return False
@@ -293,7 +304,7 @@ async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str]
         return bool(row)
 
 async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estratti: str, data_ricezione_custom: Optional[str] = None):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         now_str = data_ricezione_custom if data_ricezione_custom else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         try:
@@ -301,12 +312,14 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
         except Exception:
             dati_json = {}
 
+        mittente_finale = dati_json.get("cliente_id", mittente)
+
         corrected_date = await normalize_data_consegna(dati_json.get("data_consegna"), now_str)
         if corrected_date and dati_json.get("data_consegna") != corrected_date:
             dati_json["data_consegna"] = corrected_date
             dati_estratti = json.dumps(dati_json, ensure_ascii=False)
 
-        row = await _trova_ordine_esistente_per_data(db, mittente, corrected_date)
+        row = await _trova_ordine_esistente_per_data(db, mittente_finale, corrected_date)
 
         target_id = None
         storico_precedente = ""
@@ -335,14 +348,14 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
         else:
             await db.execute(
                 "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
-                (mittente, nuovo_messaggio, dati_estratti, now_str)
+                (mittente_finale, nuovo_messaggio, dati_estratti, now_str)
             )
             
         await db.commit()
 
         try:
             dati_parsed_obj = json.loads(dati_estratti)
-            await registra_o_aggiorna_cliente_json(mittente, nuovo_messaggio, dati_parsed_obj)
+            await registra_o_aggiorna_cliente_json(mittente_finale, nuovo_messaggio, dati_parsed_obj)
         except Exception:
             pass   
 
@@ -365,9 +378,8 @@ def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
             pass
     return 0.0
 
-# --- MODIFICA FONDAMENTALE: Accetta lista prodotti invece di un peso globale ---
 async def aggiorna_confezionamento_ordine(id_ordine: int, prodotti_aggiornati: list):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
         if not row:
@@ -376,15 +388,20 @@ async def aggiorna_confezionamento_ordine(id_ordine: int, prodotti_aggiornati: l
         dati_raw = row[0]
         dati_parsed = parse_dati_estratti_ia(dati_raw)
 
-        # Calcola peso reale totale sommando tutte le grammature non fisse
         peso_totale = 0.0
         lotto_generico = ""
         for p in prodotti_aggiornati:
             if not p.get("is_peso_fisso"):
                 try:
-                    # Estrae il numero (es. "0.500 KG" -> 0.5)
                     g_str = str(p.get("grammatura", "0")).replace(',', '.').replace('KG', '').replace('kg', '').strip()
-                    peso_totale += float(g_str)
+                    val = float(g_str)
+                    um = p.get("unita_di_misura", "kg").lower()
+                    
+                    if um in ["pezzi", "pz", "coppia", "coppie"]:
+                        qta = float(p.get("quantita", 1.0))
+                        peso_totale += (val * qta)
+                    else:
+                        peso_totale += val
                 except ValueError:
                     pass
             if p.get("numero_lotto") and not lotto_generico:
@@ -405,7 +422,7 @@ async def aggiorna_confezionamento_ordine(id_ordine: int, prodotti_aggiornati: l
         return True
 
 async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numero_lotto: Optional[str] = None):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
         if not row:
@@ -435,10 +452,15 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
                 if not p.get("grammatura") or str(p.get("grammatura")).strip() == "":
                     p["grammatura"] = f"{p.get('quantita', 1.0)} {p.get('unita_di_misura', 'kg')}"
                 
-                # Somma al peso totale
                 try:
                     g_str = str(p.get("grammatura", "0")).replace(',', '.').replace('KG', '').replace('kg', '').strip()
-                    peso_totale += float(g_str)
+                    val = float(g_str)
+                    um = p.get("unita_di_misura", "kg").lower()
+                    if um in ["pezzi", "pz", "coppia", "coppie"]:
+                        qta = float(p.get("quantita", 1.0))
+                        peso_totale += (val * qta)
+                    else:
+                        peso_totale += val
                 except ValueError:
                     pass
 
@@ -475,8 +497,11 @@ def scomponi_prodotti_pezzi(prodotti: list) -> list:
         except (ValueError, TypeError):
             qta = 1.0
         
-        # Scompone in singoli pezzi se l'unità è in pezzi e > 1
-        if um in ["pezzi", "pz"] and 1 < qta <= 100 and qta.is_integer():
+        nome_check = str(p.get("nome_articolo") or p.get("codice_articolo") or "").lower()
+        
+        is_caciocavallo_silano = "caciocavallo silano" in nome_check or ("caciocavallo" in nome_check and "dop" in nome_check)
+        
+        if is_caciocavallo_silano and um in ["pezzi", "pz", "coppia", "coppie"] and 1 < qta <= 100 and qta.is_integer():
             count = int(qta)
             base_name = p.get("nome_articolo") or p.get("codice_articolo") or "Prodotto"
             for i in range(count):
@@ -492,8 +517,8 @@ def scomponi_prodotti_pezzi(prodotti: list) -> list:
             
     return prodotti_scomposti
 
-async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bool = False):
-    async with aiosqlite.connect(DB_FILE) as db:
+async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bool = False, includi_non_ordini: bool = False):
+    async with get_db_connection() as db:
         query = "SELECT id, mittente, testo_originale, dati_estratti_ia, data_ricezione FROM ordini ORDER BY data_ricezione DESC"
         cursor = await db.execute(query)
         rows = await cursor.fetchall()
@@ -506,6 +531,13 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
             dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
             if not dati_parsed and dati_ia_raw:
                 dati_parsed = {"is_order": True, "prodotti": [], "note_ordine": str(dati_ia_raw)}
+
+            is_cancelled_rec = bool(dati_parsed.get("is_cancelled")) or dati_parsed.get("stato_ordine") == "ANNULLATO"
+            
+            is_valid_order = dati_parsed.get("is_order", False) or is_cancelled_rec or len(dati_parsed.get("prodotti", [])) > 0
+            
+            if not is_valid_order and not includi_non_ordini:
+                continue
 
             data_consegna = await normalize_data_consegna(dati_parsed.get("data_consegna"), data_ric)
             if not data_consegna:
@@ -547,6 +579,8 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 "data_consegna": data_consegna,
                 "prodotti": prodotti,
                 "note_ordine": dati_parsed.get("note_ordine", ""),
+                "is_order": dati_parsed.get("is_order", len(prodotti) > 0),
+                "is_cancelled": is_cancelled_rec,
                 "da_verificare_manualmente": dati_parsed.get("da_verificare_manualmente", False),
                 "stato_ordine": dati_parsed.get("stato_ordine", "IN_ATTESA"),
                 "stato_confezionamento": dati_parsed.get("stato_confezionamento", "DA_CONFEZIONARE"),
@@ -574,7 +608,7 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
     testo_orig = f"[Inserimento Manuale Dashboard] {note}"
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute(
             "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
             (mittente, testo_orig, json.dumps(dati_ia, ensure_ascii=False), now_str)
@@ -590,7 +624,7 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
         return last_id
 
 async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT mittente, testo_originale, dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
         if not row:
@@ -613,13 +647,13 @@ async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_c
         return True
 
 async def elimina_ordine(id_ordine: int):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute("DELETE FROM ordini WHERE id = ?", (id_ordine,))
         await db.commit()
         return True
 
 async def svuota_database_ordini():
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute("DELETE FROM ordini")
         await db.commit()
         print("🧹 Database ordini svuotato con successo.")
@@ -629,7 +663,7 @@ async def rielabora_tutti_ordini():
     from backend.ai_parser import AIParser
     ai_parser = AIParser(base_dir="catalogo")
     
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT id, mittente, testo_originale FROM ordini")
         rows = await cursor.fetchall()
         
@@ -646,7 +680,12 @@ async def rielabora_tutti_ordini():
                 continue
 
             risultato_ia = await ai_parser.parse_message(clean_text, client_name=mittente)
-            if risultato_ia and risultato_ia.get("is_order"):
+            ordini_ottenuti = (risultato_ia or {}).get("ordini", [])
+            has_valid_order = any(
+                o.get("is_order") and len(o.get("prodotti", [])) > 0
+                for o in ordini_ottenuti
+            )
+            if has_valid_order:
                 json_str = json.dumps(risultato_ia, ensure_ascii=False)
                 await db.execute("UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?", (json_str, id_ord))
                 count += 1
@@ -862,13 +901,15 @@ async def get_lista_clienti_registrati():
         try:
             with open(part_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                for c in data.get("clienti", []):
-                    if c.get("nome_cliente"):
-                        clienti_set.add(c.get("nome_cliente").strip())
+                lista_clienti = data if isinstance(data, list) else []
+                for c in lista_clienti:
+                    nome = c.get("n") or c.get("nome_cliente")
+                    if nome:
+                        clienti_set.add(nome.strip())
         except Exception:
             pass
 
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT DISTINCT mittente FROM ordini WHERE mittente IS NOT NULL AND mittente != ''")
         rows = await cursor.fetchall()
         for r in rows:
@@ -877,7 +918,7 @@ async def get_lista_clienti_registrati():
     return sorted(list(clienti_set))
 
 async def sblocca_ordine_confezionamento(id_ordine: int):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
         if not row:
@@ -898,7 +939,7 @@ async def sblocca_ordine_confezionamento(id_ordine: int):
         return True
 
 async def get_broadcast_liste():
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT id, nome_lista, contatti_json FROM broadcast_liste ORDER BY nome_lista ASC")
         rows = await cursor.fetchall()
         res = []
@@ -911,7 +952,7 @@ async def get_broadcast_liste():
         return res
 
 async def salva_broadcast_lista(nome_lista: str, contatti: list):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         contatti_json = json.dumps(contatti, ensure_ascii=False)
         await db.execute(
             "INSERT INTO broadcast_liste (nome_lista, contatti_json) VALUES (?, ?) ON CONFLICT(nome_lista) DO UPDATE SET contatti_json=excluded.contatti_json",
@@ -921,13 +962,13 @@ async def salva_broadcast_lista(nome_lista: str, contatti: list):
         return True
 
 async def elimina_broadcast_lista(id_lista: int):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute("DELETE FROM broadcast_liste WHERE id = ?", (id_lista,))
         await db.commit()
         return True
 
 async def get_broadcast_schedulati():
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT id, id_lista, nome_lista, messaggio, orario_programmato, stato, data_invio, ricorrenza FROM broadcast_schedulati ORDER BY orario_programmato ASC")
         rows = await cursor.fetchall()
         return [{
@@ -937,7 +978,7 @@ async def get_broadcast_schedulati():
         } for r in rows]
 
 async def crea_broadcast_schedulato(id_lista: int, nome_lista: str, messaggio: str, orario_programmato: str, ricorrenza: str = "UNA_TANTUM"):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute(
             "INSERT INTO broadcast_schedulati (id_lista, nome_lista, messaggio, orario_programmato, stato, ricorrenza) VALUES (?, ?, ?, ?, 'PROGRAMMATO', ?)",
             (id_lista, nome_lista, messaggio, orario_programmato, ricorrenza)
@@ -946,13 +987,13 @@ async def crea_broadcast_schedulato(id_lista: int, nome_lista: str, messaggio: s
         return True
 
 async def elimina_broadcast_schedulato(id_sched: int):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute("DELETE FROM broadcast_schedulati WHERE id = ?", (id_sched,))
         await db.commit()
         return True
 
 async def registra_broadcast_log(id_schedulazione: int, destinatario: str, messaggio: str, stato_esito: str):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute(
             "INSERT INTO broadcast_logs (id_schedulazione, destinatario, messaggio, stato_esito) VALUES (?, ?, ?, ?)",
             (id_schedulazione, destinatario, messaggio, stato_esito)
@@ -961,7 +1002,7 @@ async def registra_broadcast_log(id_schedulazione: int, destinatario: str, messa
         return True
 
 async def get_broadcast_logs():
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute("SELECT id, id_schedulazione, destinatario, messaggio, stato_esito, timestamp_invio FROM broadcast_logs ORDER BY timestamp_invio DESC LIMIT 100")
         rows = await cursor.fetchall()
         return [{
@@ -970,7 +1011,7 @@ async def get_broadcast_logs():
         } for r in rows]
 
 async def elimina_broadcast_log(id_log: int):
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         await db.execute("DELETE FROM broadcast_logs WHERE id = ?", (id_log,))
         await db.commit()
         return True
@@ -978,7 +1019,7 @@ async def elimina_broadcast_log(id_log: int):
 async def salva_campione_ia_cliente(cliente_id: str, testo_originale: str, dati_confermati: dict):
     if not cliente_id or not testo_originale:
         return False
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         json_data = json.dumps(dati_confermati, ensure_ascii=False)
         await db.execute(
             "INSERT INTO campioni_ia_clienti (cliente_id, testo_originale, dati_confermati_json) VALUES (?, ?, ?)",
@@ -990,7 +1031,7 @@ async def salva_campione_ia_cliente(cliente_id: str, testo_originale: str, dati_
 async def get_campioni_ia_cliente(cliente_id: str, limit: int = 5):
     if not cliente_id:
         return []
-    async with aiosqlite.connect(DB_FILE) as db:
+    async with get_db_connection() as db:
         cursor = await db.execute(
             "SELECT testo_originale, dati_confermati_json FROM campioni_ia_clienti WHERE cliente_id = ? ORDER BY timestamp_conferma DESC LIMIT ?",
             (cliente_id.strip(), limit)

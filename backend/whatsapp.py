@@ -11,7 +11,7 @@ from backend.db import get_storico_oggi, salva_o_aggiorna_ordine, ordine_esiste_
 from backend.ai_parser import AIParser
 
 # ---------------------------------------------------------
-# CONFIGURAZIONE EVOLUTION API
+# CONFIGURAZIONE EVOLUTION API E SICUREZZA CONCORRENZA
 # ---------------------------------------------------------
 EVOLUTION_URL = os.environ.get("EVOLUTION_URL", "http://localhost:8080")
 EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "petruzzi_segreto_12345")
@@ -21,6 +21,9 @@ WEBHOOK_EVENTS = ["APPLICATION_STARTUP", "QRCODE_UPDATED", "CONNECTION_UPDATE", 
 
 SYNC_INTERVAL_SECONDS = int(os.environ.get("WHATSAPP_SYNC_INTERVAL_SECONDS", "120"))
 _sync_loop_task: Optional[asyncio.Task] = None
+
+# 🚦 SEMAFORO DATABASE: Previene l'errore "database is locked" forzando la fila indiana
+DB_WRITE_LOCK = asyncio.Lock()
 
 ai_parser = AIParser(base_dir="catalogo")
 messaggi_processati = set()
@@ -34,6 +37,9 @@ WHATSAPP_STATE = {
     "ultima_sincronizzazione_periodica": None,
     "eventi_log": []
 }
+
+# Memoria Ram per la Rubrica Telefonica
+WHATSAPP_CONTACTS = {}
 
 def add_whatsapp_log(messaggio: str, tipo: str = "INFO", metadata: Optional[dict] = None):
     entry = {
@@ -78,6 +84,27 @@ async def _configura_webhook_evolution():
         add_whatsapp_log(f"⚠️ Impossibile configurare il webhook: {e}", "WARN")
         return False
 
+async def _sincronizza_rubrica_evolution():
+    try:
+        res = requests.post(f"{EVOLUTION_URL}/chat/findContacts/{INSTANCE_NAME}", json={}, headers=_req_headers(), timeout=20)
+        if res.status_code == 200:
+            dati = res.json()
+            records = dati if isinstance(dati, list) else dati.get("records", [])
+            for c in records:
+                jid = c.get("id", "")
+                if not jid:
+                    continue
+                name = c.get("name") or c.get("contactName") or c.get("pushName") or c.get("verifiedName") or ""
+                name = str(name).strip()
+                phone = jid.split('@')[0]
+                
+                clean_name = name.replace("+", "").replace(" ", "")
+                if name and clean_name != phone and clean_name != phone.lstrip("39"):
+                    WHATSAPP_CONTACTS[phone] = name
+            add_whatsapp_log(f"📔 Rubrica WhatsApp sincronizzata: {len(WHATSAPP_CONTACTS)} contatti trovati in memoria.", "INFO")
+    except Exception as e:
+        add_whatsapp_log(f"⚠️ Errore sincronizzazione rubrica: {e}", "WARN")
+
 async def _loop_sincronizzazione_periodica():
     while True:
         try:
@@ -105,6 +132,7 @@ async def avvia_whatsapp():
                 add_whatsapp_log("🟢 Istanza già connessa e operativa!", "SUCCESS")
 
                 await _configura_webhook_evolution()
+                asyncio.create_task(_sincronizza_rubrica_evolution())
                 avvia_loop_sincronizzazione_periodica()
                 return
             else:
@@ -161,29 +189,17 @@ async def reset_whatsapp_banco():
     asyncio.create_task(avvia_whatsapp())
     return True
 
-
-# ---------------------------------------------------------
-# HELPER PER PULIZIA NOMI CONTATTI
-# ---------------------------------------------------------
 def _normalizza_telefono(numero: str) -> str:
-    """Riduce un numero alle sole cifre e alle ultime 9 (formato mobile IT senza prefisso),
-    così il confronto funziona indipendentemente da +, spazi, 0039, 39, zeri iniziali ecc."""
     if not numero:
         return ""
     solo_cifre = re.sub(r"\D", "", str(numero))
-    # normalizza eventuale prefisso internazionale 0039 -> 39
     if solo_cifre.startswith("0039"):
         solo_cifre = solo_cifre[2:]
-    # tieni solo le ultime 9 cifre: è la parte stabile di un numero mobile italiano
-    # (funziona sia che il resto abbia il prefisso 39 sia che non ce l'abbia)
     return solo_cifre[-9:] if len(solo_cifre) >= 9 else solo_cifre
 
 _RUBRICA_CACHE_PATH: Optional[str] = None
 
 def _trova_percorso_rubrica() -> Optional[str]:
-    """Cerca particolarita_clienti.json in tutte le posizioni plausibili, invece di
-    assumere ciecamente un unico percorso relativo che puo' rompersi se la struttura
-    delle cartelle cambia. Il risultato viene 'cachato' dopo il primo trovato."""
     global _RUBRICA_CACHE_PATH
     if _RUBRICA_CACHE_PATH and os.path.exists(_RUBRICA_CACHE_PATH):
         return _RUBRICA_CACHE_PATH
@@ -200,15 +216,9 @@ def _trova_percorso_rubrica() -> Optional[str]:
         if os.path.exists(c_abs):
             _RUBRICA_CACHE_PATH = c_abs
             return c_abs
-
-    add_whatsapp_log(
-        f"⚠️ particolarita_clienti.json non trovato in nessuno dei percorsi attesi: {[os.path.abspath(c) for c in candidati]}",
-        "WARN"
-    )
     return None
 
 def _trova_nome_in_rubrica_locale(phone_number: str) -> str:
-    """Cerca il numero di telefono nel nostro database locale per usare il nome personalizzato."""
     part_path = _trova_percorso_rubrica()
     if not part_path:
         return ""
@@ -216,31 +226,35 @@ def _trova_nome_in_rubrica_locale(phone_number: str) -> str:
     try:
         with open(part_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-    except Exception as e:
-        add_whatsapp_log(f"⚠️ Errore leggendo particolarita_clienti.json ({part_path}): {e}", "WARN")
+    except Exception:
         return ""
 
     target = _normalizza_telefono(phone_number)
     if not target:
         return ""
 
-    for cli in data.get("clienti", []):
-        # supporta sia "telefono" sia eventuali chiavi alternative usate nel file
-        tel_raw = cli.get("telefono") or cli.get("numero") or cli.get("cellulare") or ""
-        tel_norm = _normalizza_telefono(tel_raw)
-        if tel_norm and tel_norm == target:
-            nome_cli = (cli.get("nome_cliente") or cli.get("nome") or "").strip()
-            if nome_cli:
-                return nome_cli
+    # Assicurati di gestire il file come una lista diretta
+    lista_clienti = data if isinstance(data, list) else []
 
-    add_whatsapp_log(
-        f"ℹ️ Numero {phone_number} non presente in particolarita_clienti.json (nessuna corrispondenza su {target}).",
-        "INFO"
-    )
+    for cli in lista_clienti:
+        # Usa la nuova chiave 't' per il telefono
+        tel_raw = cli.get("t") or cli.get("telefono") or cli.get("numero") or cli.get("cellulare") or ""
+        tel_norm = _normalizza_telefono(tel_raw)
+        
+        if tel_norm and tel_norm == target:
+            # Usa la nuova chiave 'n' per il nome
+            nome_cli = (cli.get("n") or cli.get("nome_cliente") or cli.get("nome") or "").strip()
+            
+            clean_nome = nome_cli.replace("+", "").replace(" ", "").replace("()", "")
+            if clean_nome == phone_number or clean_nome == phone_number.lstrip("39"):
+                continue
+            if nome_cli.lower() in ["cliente", "cliente whatsapp", "wa user", ""]:
+                continue
+                
+            return nome_cli
     return ""
 
 def _estrai_nome_contatto(msg: dict, phone_number: str) -> str:
-    """Cerca di estrarre un nome sensato da WhatsApp, ignorando finti nomi e numeri duplicati."""
     name = msg.get("contactName") or msg.get("verifiedName") or msg.get("pushName") or msg.get("name") or ""
     name = str(name).strip()
 
@@ -257,7 +271,6 @@ def _estrai_nome_contatto(msg: dict, phone_number: str) -> str:
     return name
 
 def _forza_ricerca_nome_evolution(remote_jid: str, phone_number: str) -> str:
-    """Se il messaggio non contiene il nome, interroga aggressivamente la rubrica di Evolution API."""
     try:
         res = requests.post(
             f"{EVOLUTION_URL}/chat/findContacts/{INSTANCE_NAME}", 
@@ -273,11 +286,8 @@ def _forza_ricerca_nome_evolution(remote_jid: str, phone_number: str) -> str:
                 nome_pulito = str(nome).strip()
                 if nome_pulito and _normalizza_telefono(nome_pulito) != _normalizza_telefono(phone_number):
                     return nome_pulito
-            add_whatsapp_log(f"ℹ️ Evolution API non ha un nome salvato per {remote_jid} (rubrica del telefono vuota per questo contatto).", "INFO")
-        else:
-            add_whatsapp_log(f"⚠️ findContacts su Evolution API ha risposto {res.status_code} per {remote_jid}.", "WARN")
-    except Exception as e:
-        add_whatsapp_log(f"⚠️ Errore chiamando findContacts su Evolution API: {e}", "WARN")
+    except Exception:
+        pass
     return ""
 
 def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
@@ -366,7 +376,6 @@ async def sincronizza_chat_recenti_background():
                     if not testo and not is_vocal:
                         continue
 
-                    # RICOSTRUZIONE NOME SUPER-INTELLIGENTE
                     phone_number = remote_jid.split("@")[0]
                     nome_finale = _trova_nome_in_rubrica_locale(phone_number)
                     
@@ -376,7 +385,6 @@ async def sincronizza_chat_recenti_background():
                     if not nome_finale:
                         nome_finale = _forza_ricerca_nome_evolution(remote_jid, phone_number)
                         
-                    # Se non lo trova neanche così, mette solo il numero, rimuovendo la fastidiosa parola "Cliente"
                     mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
 
                     data_ricezione_custom = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') if timestamp else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -388,8 +396,9 @@ async def sincronizza_chat_recenti_background():
                     messaggi_processati.add(msg_id)
                     processed_count += 1
 
+                    # ⏳ FRENO A MANO PER GROQ API: Una chiamata ogni 5 secondi, MAX 12 RPM per azzerare gli errori 429
                     asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom))
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(5.0)
                 except Exception as msg_err:
                     continue
 
@@ -425,6 +434,7 @@ async def elabora_webhook_evolution(payload: dict):
             WHATSAPP_STATE["data_connessione"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             add_whatsapp_log("🟢 WHATSAPP BANCO CONNESSO ED ATTIVO VIA EVOLUTION!", "SUCCESS")
             asyncio.create_task(_configura_webhook_evolution())
+            asyncio.create_task(_sincronizza_rubrica_evolution())
             avvia_loop_sincronizzazione_periodica()
         elif state == "close":
             WHATSAPP_STATE["stato_connessione"] = "DISCONNESSO"
@@ -447,7 +457,6 @@ async def elabora_webhook_evolution(payload: dict):
             if "@g.us" in mittente_id:
                 continue
                 
-            # RICOSTRUZIONE NOME SUPER-INTELLIGENTE
             phone_number = mittente_id.split("@")[0]
             nome_finale = _trova_nome_in_rubrica_locale(phone_number)
             
@@ -457,7 +466,6 @@ async def elabora_webhook_evolution(payload: dict):
             if not nome_finale:
                 nome_finale = _forza_ricerca_nome_evolution(mittente_id, phone_number)
                 
-            # Se non lo trova neanche così, mette solo il numero, rimuovendo "Cliente"
             mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
             
             testo = ""
@@ -526,7 +534,8 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
             mime_type = media_info["mimeType"]
             add_whatsapp_log(f"⚡ Audio scaricato. Trascrizione IA in corso...", "AUDIO")
 
-    storico_di_oggi = await get_storico_oggi(mittente)
+    is_andrea_mittente = "3334695153" in (mittente or "")
+    storico_di_oggi = "" if is_andrea_mittente else await get_storico_oggi(mittente)
     dt_msg = datetime.strptime(data_ricezione_custom, '%Y-%m-%d %H:%M:%S')
 
     risultato_ia = await ai_parser.parse_message(
@@ -540,23 +549,16 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
     
     if risultato_ia is None:
         risultato_ia = {
-            "is_order": False,
-            "prodotti": [],
-            "note_ordine": "Errore durante l'analisi IA.",
-            "da_verificare_manualmente": True
+            "testo_trascritto": "",
+            "ordini": [{
+                "is_order": False,
+                "prodotti": [],
+                "note_ordine": "Errore durante l'analisi IA.",
+                "da_verificare_manualmente": True
+            }]
         }
         
-    risultato_ia["timestamp_elaborazione"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-    prodotti = risultato_ia.get("prodotti", [])
-    is_cancelled = risultato_ia.get("is_cancelled", False)
-
-    if len(prodotti) == 0 and not is_cancelled:
-        risultato_ia["is_order"] = False
-        
-    is_order = risultato_ia.get("is_order", False)
-    
-    trascrizione = risultato_ia.get("testo_trascritto")
+    trascrizione = risultato_ia.get("testo_trascritto", "")
     if trascrizione:
         testo_db = f"🎙️ [VOCALE TRASCRITTO]: \"{trascrizione}\""
         add_whatsapp_log(f"🎙️ [TRASCRIZIONE] {mittente}: \"{trascrizione}\"", "SUCCESS")
@@ -564,21 +566,41 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
         testo_db = f"🎙️ [MESSAGGIO VOCALE] {testo}"
     else:
         testo_db = testo
+        
+    lista_ordini = risultato_ia.get("ordini", [])
+    if not lista_ordini:
+        lista_ordini = [risultato_ia]
 
-    if is_cancelled or (storico_di_oggi and not is_order and len(prodotti) == 0 and ("annull" in testo.lower() or "cancell" in testo.lower())):
-        add_whatsapp_log(f"🚫 Ordine per {mittente} ANNULLATO.", "WARN")
-        risultato_ia["is_order"] = False
-        risultato_ia["is_cancelled"] = True
-        risultato_ia["prodotti"] = []
-        risultato_ia["stato_ordine"] = "ANNULLATO"
-        await salva_o_aggiorna_ordine(mittente, testo_db, json.dumps(risultato_ia, ensure_ascii=False), data_ricezione_custom=data_ricezione_custom)
-    elif is_order:
-        n_prod = len(prodotti)
-        add_svg = f"✅ Ordine acquisito per {mittente} ({n_prod} prodotti)"
-        add_whatsapp_log(add_svg, "SUCCESS")
-        await salva_o_aggiorna_ordine(mittente, testo_db, json.dumps(risultato_ia, ensure_ascii=False), data_ricezione_custom=data_ricezione_custom)
-    else:
-        add_whatsapp_log(f"ℹ️ Messaggio cortesia da {mittente}", "INFO")
+    for ord_singolo in lista_ordini:
+        ord_singolo["timestamp_elaborazione"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        prodotti = ord_singolo.get("prodotti", [])
+        is_cancelled = ord_singolo.get("is_cancelled", False)
+
+        if len(prodotti) == 0 and not is_cancelled:
+            ord_singolo["is_order"] = False
+            
+        is_order = ord_singolo.get("is_order", False)
+        cliente_finale = ord_singolo.get("cliente_id", mittente)
+
+        # 🚦 Sincronizziamo la scrittura sul DB usando il semaforo (Lock)
+        async with DB_WRITE_LOCK:
+            if is_cancelled or (storico_di_oggi and not is_order and len(prodotti) == 0 and ("annull" in testo.lower() or "cancell" in testo.lower())):
+                add_whatsapp_log(f"🚫 Ordine per {cliente_finale} ANNULLATO.", "WARN")
+                ord_singolo["is_order"] = False
+                ord_singolo["is_cancelled"] = True
+                ord_singolo["prodotti"] = []
+                ord_singolo["stato_ordine"] = "ANNULLATO"
+                await salva_o_aggiorna_ordine(cliente_finale, testo_db, json.dumps(ord_singolo, ensure_ascii=False), data_ricezione_custom=data_ricezione_custom)
+            elif is_order:
+                n_prod = len(prodotti)
+                add_whatsapp_log(f"✅ Ordine acquisito per {cliente_finale} ({n_prod} prodotti)", "SUCCESS")
+                await salva_o_aggiorna_ordine(cliente_finale, testo_db, json.dumps(ord_singolo, ensure_ascii=False), data_ricezione_custom=data_ricezione_custom)
+            elif ord_singolo.get("da_verificare_manualmente"):
+                add_whatsapp_log(f"⚠️ Messaggio da {cliente_finale} senza prodotti riconosciuti: salvato da verificare.", "WARN")
+                await salva_o_aggiorna_ordine(cliente_finale, testo_db, json.dumps(ord_singolo, ensure_ascii=False), data_ricezione_custom=data_ricezione_custom)
+            else:
+                add_whatsapp_log(f"ℹ️ Messaggio cortesia relativo a {cliente_finale}", "INFO")
 
 async def forzare_scansione_chat():
     await _configura_webhook_evolution()

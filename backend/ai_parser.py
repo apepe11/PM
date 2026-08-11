@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple, Union, Any
 
 from dotenv import load_dotenv
-from groq import Groq
+from groq import AsyncGroq
 
 load_dotenv()
 
@@ -18,8 +18,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY non impostata. Creare un file .env con GROQ_API_KEY=...")
-
-client_groq = Groq(api_key=GROQ_API_KEY)
 
 # Modello principale (Alta precisione)
 GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -31,19 +29,14 @@ GROQ_LOCK = asyncio.Lock()
 LAST_GROQ_REQUEST_TIME = 0.0
 
 def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_name: str = "") -> Tuple[str, str]:
-    """
-    Calcola la data di consegna di DEFAULT basandosi sull'orario o sul mittente.
-    """
     if ora_attuale is None:
         ora_attuale = datetime.now()
 
     h = ora_attuale.hour
-    wd = ora_attuale.weekday() # 0=Lunedì, ..., 5=Sabato, 6=Domenica
+    wd = ora_attuale.weekday()
 
-    # Controllo se il mittente è il titolare in base al numero di telefono esatto
-    is_andrea = "3334695153" in client_name
+    is_andrea = "3334695153" in client_name or "224257489502407" in client_name or "andrea aliandro" in client_name.lower()
 
-    # --- REGOLE SPECIALI PER ANDREA (IL TITOLARE) ---
     if is_andrea:
         data_target = ora_attuale
         desc = (
@@ -53,7 +46,6 @@ def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_
         )
         return data_target.strftime('%Y-%m-%d'), desc
 
-    # --- REGOLA STANDARD DELL'OROLOGIO (< 08:00 = OGGI, >= 08:00 = DOMANI) ---
     if h < 8:
         data_target = ora_attuale
         desc = (
@@ -62,13 +54,12 @@ def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_
             f"Se il cliente NON ha specificato alcun giorno/orario nel testo, imposta la consegna di DEFAULT per OGGI: \"{data_target.strftime('%Y-%m-%d')}\"."
         )
     else:
-        # Se è Sabato dopo le 8, slitta a Lunedì (aggiungi 2 giorni)
         if wd == 5:
             data_target = ora_attuale + timedelta(days=2)
         else:
             data_target = ora_attuale + timedelta(days=1)
             
-        if data_target.weekday() == 6: # Se cade di domenica, lunedì
+        if data_target.weekday() == 6:
             data_target += timedelta(days=1)
             
         desc = (
@@ -82,16 +73,26 @@ def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_
 class AIParser:
     def __init__(self, base_dir="catalogo"):
         self.base_dir = base_dir
-        self.catalog = self._load_json(os.path.join(base_dir, "catalogo_prodotti.json"), [])
         
-        raw_synonyms = self._load_json(os.path.join(base_dir, "catalogo_sinonimi.json"), [])
+        # --- PERCORSI RELATIVI ---
+        catalogo_path = os.path.join(self.base_dir, "catalogo.json")
+        particolarita_path = os.path.join(self.base_dir, "particolarita_clienti.json")
+        
+        # Carica il catalogo unificato con la nuova struttura
+        self.catalog = self._load_json(catalogo_path, [])
+        
+        # Mappatura sinonimi con le nuove chiavi "c" e "s"
         self.synonyms_map = {}
-        for item in raw_synonyms:
-            cod_art = item.get("codice_articolo")
+        for item in self.catalog:
+            cod_art = item.get("c")
             if cod_art:
-                self.synonyms_map[cod_art] = item.get("sinonimi", "")
+                self.synonyms_map[cod_art] = item.get("s", "")
                 
-        self.client_rules = self._load_json(os.path.join(base_dir, "particolarita_clienti.json"), {"clienti": []})
+        # Le particolarità ora sono una lista diretta di oggetti
+        self.client_rules = self._load_json(particolarita_path, [])
+        
+        self.client_groq = AsyncGroq(api_key=GROQ_API_KEY, max_retries=0)
+        self.current_model = GROQ_MODEL
 
     def _load_json(self, file_path: str, default_value: Any) -> Any:
         if os.path.exists(file_path):
@@ -140,100 +141,84 @@ class AIParser:
 
     def get_specific_client_rules(self, client_name: str) -> str:
         client_name_lower = (client_name or "").lower()
-        lista_clienti = self.client_rules.get("clienti", [])
+        lista_clienti = self.client_rules if isinstance(self.client_rules, list) else []
         
         for cliente in lista_clienti:
-            nome_registrato = cliente.get("nome_cliente", "")
+            # Lettura basata sul nuovo formato minimizzato
+            nome_registrato = cliente.get("n", "")
             
             if nome_registrato.lower() in client_name_lower or client_name_lower in nome_registrato.lower():
-                particolarita = cliente.get("particolarita", "")
-                ric_def = cliente.get("ricotta_default", "")
-                mozz_def = cliente.get("mozzarella_default", "")
+                particolarita = cliente.get("p", "")
+                ric_def = cliente.get("rd", "")
+                mozz_def = cliente.get("md", "")
+                strac_def = cliente.get("sd", "")
+                
+                rule_text = f"\n⚠️ REGOLE CLIENTE '{nome_registrato}':\n"
+                if particolarita: rule_text += f"- Note: {particolarita}\n"
+                if ric_def: rule_text += f"- Default ricotta: {ric_def}\n"
+                if mozz_def: rule_text += f"- Default mozzarella: {mozz_def}\n"
+                if strac_def: rule_text += f"- Default stracciatella: {strac_def}\n"
+                
                 storico = cliente.get("storico_ordini_esempi", [])
-                
-                rule_text = f"\n⚠️ ATTENZIONE - ABITUDINI E PARTICOLARITÀ DEL CLIENTE '{nome_registrato}':\n"
-                if particolarita: rule_text += f"- Regole Generali: {particolarita}\n"
-                if ric_def: rule_text += f"- Se ordina ricotta senza specificare, intende: {ric_def}\n"
-                if mozz_def: rule_text += f"- Se ordina mozzarella senza specificare, intende: {mozz_def}\n"
-                
                 if storico:
-                    es = storico[0] if len(storico) > 0 else None
+                    es = storico[0]
                     if es:
-                        rule_text += "- ESEMPIO STORICO (TRADUCI ESATTAMENTE COSÌ I SUOI ORDINI):\n"
-                        rule_text += f"  * Messaggio: \"{es.get('messaggio_raw')}\"\n"
-                        rule_text += f"    Traduzione: {json.dumps(es.get('traduzione_ia'), separators=(',', ':'), ensure_ascii=False)}\n"
+                        # Estraiamo un riassunto testuale invece di stampare il JSON
+                        prods = es.get('traduzione_ia', [])
+                        if isinstance(prods, list):
+                            prod_str = ", ".join([f"{p.get('quantita', 1)} {p.get('unita_di_misura', '')} {p.get('codice_articolo', '')}" for p in prods if isinstance(p, dict)])
+                            rule_text += f"- ES: \"{str(es.get('messaggio_raw'))[:60]}\" -> {prod_str}\n"
                         
                 return rule_text
         return ""
 
     def build_system_instruction(self, client_name: str = "", campioni_passati_str: str = "", message_timestamp: Optional[datetime] = None):
-        catalogo_compresso = []
+        # 1. CATALOGO SUPER COMPATTO (Usa una stringa separata da pipe invece di un JSON)
+        cat_items = []
         for p in self.catalog:
-            catalogo_compresso.append({
-                "cod": p.get("codice_articolo", p.get("codice_prodotto")),
-                "nome": p.get("nome_articolo", p.get("nome_prodotto")),
-                "um": p.get("unita_misura", p.get("unita_di_misura", "kg")).lower()
-            })
-        
-        catalog_formatted = json.dumps(catalogo_compresso, separators=(',', ':'), ensure_ascii=False)
-        regole_cliente = self.get_specific_client_rules(client_name)
-        campioni_block = f"\nSTORICO CAMPIONI CONFERMATI '{client_name}':\n{campioni_passati_str}\n" if campioni_passati_str else ""
+            cod = p.get("c", "")
+            nome = p.get("n", "")
+            if cod and nome:
+                cat_items.append(f"{cod}:{nome}")
+        catalog_formatted = "|".join(cat_items)
 
+        regole_cliente = self.get_specific_client_rules(client_name)
+        campioni_block = f"\nCAMPIONI PRECEDENTI:\n{campioni_passati_str}\n" if campioni_passati_str else ""
         data_target_str, descrizione_slot = calcola_data_consegna_target(message_timestamp, client_name)
 
-        is_andrea = "3334695153" in client_name
-        andrea_rule = ""
-        if is_andrea:
-            andrea_rule = (
-                "5. CASO SPECIALE ANDREA (TITOLARE): Il titolare sta inoltrando un ordine per un cliente. "
-                "Il messaggio ha spesso il formato 'Cliente, data, ordine'. "
-                "ESTRAI il nome del cliente finale (scritto all'inizio) e valorizza il campo 'cliente_reale' nel JSON."
-            )
+        is_andrea = "3334695153" in client_name or "224257489502407" in client_name or "andrea aliandro" in client_name.lower()
+        andrea_rule = (
+            "ORDINI MULTIPLI ANDREA: Il mittente inoltra ordini per PIÙ CLIENTI. "
+            "Estrai ogni cliente in un blocco JSON separato nell'array 'ordini', usando 'cliente_reale'."
+        ) if is_andrea else ""
 
-        return f"""Sei l'assistente IA del Caseificio Petruzzi. 
-            Il tuo compito è analizzare la conversazione WhatsApp ed estrarre l'ordine FINALE CONSOLIDATO.
-            Restituisci UNICAMENTE un oggetto JSON valido, senza aggiungere commenti, spiegazioni o blocchi markdown.
+        return f"""Sei l'IA Caseificio Petruzzi. Estrai l'ordine in JSON rigoroso.
+        
+        DATA CONSEGNA: Se specificata usala, altrimenti usa {descrizione_slot}
+        REGOLE: {andrea_rule} Somma prodotti con STORICO. "is_cancelled":true se annullato. Note in "note_ordine".
+        
+        CATALOGO (Codice:Nome):
+        {catalog_formatted}
+        {regole_cliente}
+        {campioni_block}
 
-            REGOLE TASSATIVE DATA DI CONSEGNA (LEGGERE ATTENTAMENTE):
-            1. PRIMA REGOLA (PRIORITÀ ASSOLUTA): Se il cliente (o Andrea) specifica un giorno, una data o un termine temporale (es. "per stasera", "per domani", "per lunedì", "giovedì"), DEVI ASSOLUTAMENTE calcolare la data di consegna in base a quella parola, ignorando i default del sistema.
-            2. SECONDA REGOLA (FALLBACK): Solo ed esclusivamente se NON viene specificato nulla riguardo al giorno di consegna nel testo, usa questa logica calcolata dal sistema:
-            {descrizione_slot}
+        MAPPATURA PRODOTTI: 
+        1. Usa ESATTAMENTE Codice e Nome dal catalogo. Sole 365 -> STRACPE sfusa.
+        2. Pezzi/vaschette/coppie -> "pezzi". Grammi sfusi -> "kg" (500g = 0.5kg). Specifica "grammatura" solo se formati speciali richiesti (es. 250gr).
 
-            ALTRE REGOLE TASSATIVE:
-            3. ANALISI STORICO COMPLETO: Valuta lo "STORICO CONVERSAZIONE DI OGGI" ed il "NUOVO MESSAGGIO" assieme.
-            4. AGGIUNTE / INTEGRAZIONI: Somma i nuovi prodotti a quelli richiesti in precedenza.
-            5. CORREZIONI / SOSTITUZIONI: Applica le modifiche richieste nel risultato finale.
-            6. ANNULLAMENTO DELL'ORDINE: Se richiesto, imposta "is_cancelled": true e svuota l'array dei prodotti.
-            {andrea_rule}
-
-            CATALOGO PRODOTTI UFFICIALE:
-            {catalog_formatted}
-            {regole_cliente}
-            {campioni_block}
-
-            REGOLE DI MAPPATURA E UNITA' DI MISURA:
-            1. STRACCIATELLA: Se il cliente è "Sole 365" -> "STRACPE" (sfusa 1kg). Altrimenti -> "STRA20250PE" (vaschetta 0,250KG).
-            2. UNITA' DI MISURA:
-               - PEZZI/INTERI/COPPIE -> "unita_di_misura": "pezzi", "quantita": numero (1 coppia = 2 pezzi).
-               - CHILI/GRAMMI -> "unita_di_misura": "kg", convertire grammi in kg (1 hg = 0.1 kg).
-
-            SCHEMA JSON RICHIESTO:
-            {{
-            "testo_trascritto": "trascrizione in italiano (importante: riempi questo campo se hai trascritto un vocale)",
+        SCHEMA JSON DA RISPETTARE:
+        {{
+        "testo_trascritto": "...",
+        "ordini": [{{
             "is_order": true,
             "is_cancelled": false,
             "data_consegna": "YYYY-MM-DD",
-            "cliente_reale": "Nome Estratto (solo se il mittente è il titolare, altrimenti null)",
-            "prodotti": [
-                {{
-                "codice_articolo": "STRINGA",
-                "quantita": 1.0,
-                "unita_di_misura": "kg"
-                }}
-            ],
-            "note_ordine": "stringa",
+            "cliente_reale": "nome o null",
+            "prodotti": [{{"codice_articolo": "COD", "nome_articolo": "NOME", "quantita": 1.0, "unita_di_misura": "pezzi/kg", "grammatura": ""}}],
+            "note_ordine": "...",
             "da_verificare_manualmente": false
-            }}"""
+        }}]
+        }}"""
 
     async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg", message_timestamp: Optional[datetime] = None):
         global LAST_GROQ_REQUEST_TIME
@@ -248,7 +233,7 @@ class AIParser:
                 logging.info(f"🎙️ Avvio trascrizione Groq Whisper per {client_name}...")
                 audio_bytes = base64.b64decode(audio_data)
                 
-                transcription = client_groq.audio.transcriptions.create(
+                transcription = await self.client_groq.audio.transcriptions.create(
                   file=("audio.ogg", audio_bytes),
                   model=GROQ_AUDIO_MODEL,
                   response_format="json"
@@ -261,17 +246,35 @@ class AIParser:
             except Exception as e:
                 logging.error(f"❌ Errore trascrizione audio Groq Whisper: {e}")
 
-        if not audio_data and self.is_courtesy_or_non_order(text_to_parse):
+        testo_per_check = testo_trascritto_vocale if audio_data else text_to_parse
+
+        if self.is_courtesy_or_non_order(testo_per_check):
             return {
-                "is_order": False,
-                "cliente_id": client_name,
-                "prodotti": [],
-                "note_ordine": "Messaggio di cortesia o informativo.",
-                "da_verificare_manualmente": False
+                "testo_trascritto": testo_trascritto_vocale,
+                "ordini": [{
+                    "is_order": False,
+                    "cliente_id": client_name,
+                    "prodotti": [],
+                    "note_ordine": "Messaggio di cortesia o informativo.",
+                    "da_verificare_manualmente": False
+                }]
             }
 
-        if storico_oggi and len(storico_oggi) > 1000:
-            storico_oggi = "[...]\n" + storico_oggi[-1000:]
+        if audio_data and testo_trascritto_vocale and len(testo_trascritto_vocale.strip()) < 8:
+            return {
+                "testo_trascritto": testo_trascritto_vocale,
+                "ordini": [{
+                    "is_order": False,
+                    "cliente_id": client_name,
+                    "prodotti": [],
+                    "note_ordine": "Vocale trascritto troppo corto/non chiaro: nessun prodotto individuabile.",
+                    "da_verificare_manualmente": True
+                }]
+            }
+
+        # Riduciamo lo storico conversazione caricato (300 caratteri bastano)
+        if storico_oggi and len(storico_oggi) > 300:
+            storico_oggi = "[...]\n" + storico_oggi[-300:]
 
         try:
             from backend.db import get_campioni_ia_cliente
@@ -279,104 +282,114 @@ class AIParser:
             async def get_campioni_ia_cliente_dummy(x): return []
             get_campioni_ia_cliente = get_campioni_ia_cliente_dummy
 
+        # Carichiamo UN SOLO campione passato ultra-rimpicciolito, invece di 2
         campioni = await get_campioni_ia_cliente(client_name)
         campioni_str = ""
         if campioni:
-            campioni = campioni[:2]
-            campioni_str = "\n".join([f"- In:\"{c.get('testo_originale', '')}\"->Out:{json.dumps(c.get('dati_confermati', {}), separators=(',', ':'), ensure_ascii=False)}" for c in campioni])
+            c = campioni[0] # Prende solo l'ultimo
+            prods = c.get('dati_confermati', {}).get('prodotti', [])
+            if prods:
+                prod_txt = ",".join([f"{p.get('quantita',1)}{p.get('unita_di_misura','')} {p.get('codice_articolo','')}" for p in prods])
+                campioni_str = f"In:\"{str(c.get('testo_originale', ''))[:50]}\"->Out:{prod_txt}"
 
         max_attempts = 3
-        current_model = GROQ_MODEL
 
         for attempt in range(max_attempts):
             async with GROQ_LOCK:
                 now = time.time()
                 elapsed = now - LAST_GROQ_REQUEST_TIME
-                min_pacing = 2.0 
+                # ⏳ Attesa di sicurezza assoluta: 1 minuto tra una richiesta e l'altra
+                min_pacing = 60.0 
                 if elapsed < min_pacing:
                     await asyncio.sleep(min_pacing - elapsed)
                 LAST_GROQ_REQUEST_TIME = time.time()
 
-            try:
-                prompt_sistema = self.build_system_instruction(client_name, campioni_str, message_timestamp)
-                
-                if storico_oggi:
-                    prompt_utente = f"STORICO CONVERSAZIONE DI OGGI CON {client_name}:\n{storico_oggi}\n\nNUOVO MESSAGGIO DI CORREZIONE/AGGIUNTA:\n\"{text_to_parse}\""
-                else:
-                    prompt_utente = f"Messaggio ricevuto da {client_name}:\n\"{text_to_parse}\""
-
-                completion = client_groq.chat.completions.create(
-                    model=current_model,
-                    messages=[
-                        {"role": "system", "content": prompt_sistema},
-                        {"role": "user", "content": prompt_utente}
-                    ],
-                    temperature=0.0
-                )
-                
-                raw_text = (completion.choices[0].message.content or "").strip()
-                
-                if raw_text.startswith("```"):
-                    raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
-                    raw_text = re.sub(r'\s*```$', '', raw_text)
-                    raw_text = raw_text.strip()
-
-                parsed_json = json.loads(raw_text)
-                
-                if testo_trascritto_vocale and not parsed_json.get("testo_trascritto"):
-                    parsed_json["testo_trascritto"] = testo_trascritto_vocale
-                
-                # Sostituzione del nome se mittente è Andrea Aliandro
-                is_andrea = "3334695153" in client_name
-                cliente_finale = client_name
-                if is_andrea:
-                    estratto = str(parsed_json.get("cliente_reale", "")).strip()
-                    if estratto and estratto.lower() not in ["null", "none"] and "3334695153" not in estratto:
-                        cliente_finale = f"{estratto} (via Andrea)"
-                
-                parsed_json["cliente_id"] = cliente_finale
-
-                is_sole_365 = "sole 365" in cliente_finale.lower() or "sole365" in cliente_finale.lower()
-                prodotti_parsed = parsed_json.get("prodotti", [])
-                for p in prodotti_parsed:
-                    cod = p.get("codice_articolo", "")
-                    nome = (p.get("nome_articolo") or "").lower()
-                    qta = float(p.get("quantita", 1.0))
-                    um = (p.get("unita_di_misura") or "kg").lower()
-
-                    if "stracciatella" in nome or cod in ["STRACPE", "STRA20250PE"]:
-                        if is_sole_365:
-                            p["codice_articolo"] = "STRACPE"
-                            p["nome_articolo"] = "Stracciatella Petruzzi (Sfusa 1kg)"
-                        else:
-                            p["codice_articolo"] = "STRA20250PE"
-                            p["nome_articolo"] = "Stracciatella Petruzzi 0,250KG"
-
-                    match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', nome.replace(',', '.'))
-                    peso_unitario = float(match_kg.group(1)) if match_kg else 0.0
-
-                    if peso_unitario > 0 and um in ["pezzi", "pz", "vaschette", "unità"]:
-                        p["quantita"] = round(qta * peso_unitario, 3)
-                        p["unita_di_misura"] = "kg"
-
-                return parsed_json
-
-            except Exception as e:
-                err_str = str(e).lower()
-                if "rate limit" in err_str or "429" in err_str:
-                    if "tokens per day" in err_str and current_model == GROQ_MODEL:
-                        logging.warning(f"⚠️ Quota Token Giornaliera ({GROQ_MODEL}) esaurita! Cambio modello in corsa...")
-                        current_model = GROQ_FALLBACK_MODEL
+                try:
+                    prompt_sistema = self.build_system_instruction(client_name, campioni_str, message_timestamp)
                     
-                    logging.warning(f"⚠️ Tentativo {attempt + 1} Groq fallito (Rate Limit). Riprovo...")
-                    await asyncio.sleep(2.5) 
-                else:
-                    logging.warning(f"⚠️ Tentativo {attempt + 1} Groq fallito ({e}). Riprovo...")
-                    await asyncio.sleep(1.0)
-                
-                if attempt == max_attempts - 1:
-                    logging.error(f"❌ Errore definitivo Groq IA: {e}. Attivazione Parser Locale di riserva.")
-                    return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
+                    if storico_oggi:
+                        prompt_utente = f"STORICO CONVERSAZIONE DI OGGI CON {client_name}:\n{storico_oggi}\n\nNUOVO MESSAGGIO DI CORREZIONE/AGGIUNTA:\n\"{text_to_parse}\""
+                    else:
+                        prompt_utente = f"Messaggio ricevuto da {client_name}:\n\"{text_to_parse}\""
+
+                    completion = await self.client_groq.chat.completions.create(
+                        model=self.current_model,
+                        messages=[
+                            {"role": "system", "content": prompt_sistema},
+                            {"role": "user", "content": prompt_utente}
+                        ],
+                        temperature=0.0
+                    )
+                    
+                    raw_text = (completion.choices[0].message.content or "").strip()
+                    
+                    # Cerca e isola ESATTAMENTE il blocco JSON, ignorando eventuali chiacchiere dell'IA
+                    match_json = re.search(r'(\{.*\})', raw_text, re.DOTALL)
+                    if match_json:
+                        raw_text = match_json.group(1)
+
+                    parsed_json = json.loads(raw_text)
+                    
+                    testo_trascritto = parsed_json.get("testo_trascritto") or testo_trascritto_vocale
+                    
+                    ordini_array = parsed_json.get("ordini", [])
+                    if not ordini_array and "prodotti" in parsed_json:
+                        ordini_array = [parsed_json]
+                    
+                    is_andrea = "3334695153" in client_name or "224257489502407" in client_name or "andrea aliandro" in client_name.lower()
+                    
+                    for ord_obj in ordini_array:
+                        cliente_finale = client_name
+                        if is_andrea:
+                            estratto = str(ord_obj.get("cliente_reale", "")).strip()
+                            if estratto and estratto.lower() not in ["null", "none"] and "3334695153" not in estratto and "224257489502407" not in estratto:
+                                cliente_finale = f"{estratto} (via Andrea)"
+                        
+                        ord_obj["cliente_id"] = cliente_finale
+
+                        is_sole_365 = "sole 365" in cliente_finale.lower() or "sole365" in cliente_finale.lower()
+                        prodotti_parsed = ord_obj.get("prodotti", [])
+                        for p in prodotti_parsed:
+                            cod = p.get("codice_articolo", "")
+                            nome = (p.get("nome_articolo") or "").lower()
+                            qta = float(p.get("quantita", 1.0))
+                            um = (p.get("unita_di_misura") or "kg").lower()
+
+                            match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', nome.replace(',', '.'))
+                            peso_unitario = float(match_kg.group(1)) if match_kg else 0.0
+
+                            if peso_unitario > 0 and um in ["pezzi", "pz", "vaschette", "unità"]:
+                                p["quantita"] = round(qta * peso_unitario, 3)
+                                p["unita_di_misura"] = "kg"
+
+                        if not ord_obj.get("is_cancelled") and len(ord_obj.get("prodotti", [])) == 0:
+                            ord_obj["is_order"] = False
+                            ord_obj["da_verificare_manualmente"] = True
+                            if not ord_obj.get("note_ordine"):
+                                ord_obj["note_ordine"] = "Nessun prodotto individuato nel testo/vocale."
+
+                    return {
+                        "testo_trascritto": testo_trascritto,
+                        "ordini": ordini_array
+                    }
+
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if "rate limit" in err_str or "429" in err_str:
+                        if self.current_model == GROQ_MODEL:
+                            logging.warning(f"⚠️ Quota Token ({GROQ_MODEL}) esaurita! Cambio modello...")
+                            self.current_model = GROQ_FALLBACK_MODEL
+                        else:
+                            logging.warning(f"⚠️ Rate Limit anche sul modello di riserva. Ritardo forzato a 60 secondi...")
+                            # ⏳ Aspettiamo 1 intero minuto per resettare completamente le quote di Groq
+                            await asyncio.sleep(60.0)
+                    else:
+                        logging.warning(f"⚠️ Tentativo {attempt + 1} Groq fallito ({e}). Riprovo...")
+                        await asyncio.sleep(1.0)
+                    
+                    if attempt == max_attempts - 1:
+                        logging.error(f"❌ Errore definitivo Groq IA: {e}. Attivazione Parser Locale di riserva.")
+                        return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
 
         return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
 
@@ -384,26 +397,32 @@ class AIParser:
         testo_pulito_cifre = re.sub(r'[\s\-\.\(\)\+:]', '', text_to_parse or "")
         if testo_pulito_cifre.isdigit() and len(testo_pulito_cifre) >= 6:
             return {
-                "is_order": False, "is_cancelled": False, "cliente_id": client_name,
-                "prodotti": [], "note_ordine": "[Parser Locale] Testo scartato: sembra un numero/orario.",
-                "da_verificare_manualmente": True
+                "testo_trascritto": "",
+                "ordini": [{
+                    "is_order": False, "is_cancelled": False, "cliente_id": client_name,
+                    "prodotti": [], "note_ordine": "[Parser Locale] Testo scartato: sembra un numero/orario.",
+                    "da_verificare_manualmente": True
+                }]
             }
 
         prodotti_trovati = []
-        raw_synonyms = self._load_json(os.path.join(self.base_dir, "catalogo_sinonimi.json"), [])
         
+        # Popoliamo la lista dei sinonimi partendo dalla nuova struttura in memoria
         syn_entries = []
-        for item in raw_synonyms:
-            cod = item.get("codice_articolo")
-            nome = item.get("nome_articolo", "")
-            um = (item.get("unita_misura") or "kg").lower()
-            syns = [s.strip().lower() for s in (item.get("sinonimi") or "").split(",") if s.strip()]
-            syn_entries.append({"cod": cod, "nome": nome, "um": um, "sinonimi": syns})
+        for item in self.catalog:
+            cod = item.get("c")
+            nome = item.get("n", "")
+            peso = item.get("p")
+            
+            um_default = "pezzi" if peso else "kg"
+            
+            syns = [s.strip().lower() for s in (item.get("s") or "").split(",") if s.strip()]
+            syn_entries.append({"cod": cod, "nome": nome, "um": um_default, "sinonimi": syns})
 
-        pattern = r'(?:n[°\s]*)?(\d+(?:[.,]\d+)?)\s*(kg|k|chili|kili|g|gr|grammi|pz|pezzi|coppia|coppie|vaschette|vaschetta|cf)?\s*(?:di\s+)?([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{3,35})'
+        pattern = r'([Nn][°\.\s]+|[Nn](?=\d))?(\d+(?:[.,]\d+)?)\s*(kg|k|chili|kili|g|gr|grammi|pz|pezzi|coppia|coppie|vaschette|vaschetta|cf)?\s*(?:di\s+)?([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{3,35})'
         matches = re.findall(pattern, text_to_parse or "", re.IGNORECASE)
 
-        for qta_str, um_raw, prod_raw in matches:
+        for n_prefix, qta_str, um_raw, prod_raw in matches:
             try:
                 qta = float(qta_str.replace(',', '.'))
             except ValueError:
@@ -416,7 +435,7 @@ class AIParser:
             um_clean = (um_raw or "").strip().lower()
             
             um_finale = "kg"
-            if um_clean in ["pz", "pezzi", "coppia", "coppie", "vaschetta", "vaschette", "cf"]:
+            if n_prefix or um_clean in ["pz", "pezzi", "coppia", "coppie", "vaschetta", "vaschette", "cf"]:
                 um_finale = "pezzi"
                 if um_clean in ["coppia", "coppie"]:
                     qta *= 2
@@ -434,7 +453,7 @@ class AIParser:
                     break
 
             if matched_entry:
-                if not um_clean:
+                if not um_clean and not n_prefix:
                     um_finale = matched_entry["um"]
                     
                 prodotti_trovati.append({
@@ -447,12 +466,22 @@ class AIParser:
         base_dt = message_timestamp if message_timestamp else datetime.now()
         t_lower = (text_to_parse or "").lower()
         
-        # Recupero la data di default usando l'orologio e il controllo mittente
         data_target_str, _ = calcola_data_consegna_target(base_dt, client_name)
         data_target = datetime.strptime(data_target_str, '%Y-%m-%d')
         
-        # Controllo parole chiave specifiche nel testo (Priority Rule)
-        if "dopodomani" in t_lower:
+        date_pattern = r'\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b'
+        date_match = re.search(date_pattern, text_to_parse)
+        if date_match:
+            giorno = int(date_match.group(1))
+            mese = int(date_match.group(2))
+            anno = int(date_match.group(3)) if date_match.group(3) else base_dt.year
+            if anno < 100:
+                anno += 2000
+            try:
+                data_target = datetime(anno, mese, giorno)
+            except ValueError:
+                pass
+        elif "dopodomani" in t_lower:
             data_target = base_dt + timedelta(days=2)
             if data_target.weekday() == 6: 
                 data_target += timedelta(days=1)
@@ -489,17 +518,25 @@ class AIParser:
 
         is_canc = bool(re.search(r'\b(?:annulla|cancella|disdici|elimina|non portarmi|non mi serve)\b', t_lower, re.IGNORECASE))
 
-        # Assegnazione cliente se il mittente è Andrea
-        is_andrea = "3334695153" in client_name
+        is_andrea = "3334695153" in client_name or "224257489502407" in client_name or "andrea aliandro" in client_name.lower()
         cliente_finale = client_name
         if is_andrea:
+            estratto = None
             match_nome = re.match(r'^([^,:\n]+)[,:\n]', text_to_parse or "")
             if match_nome:
                 estratto = match_nome.group(1).strip()
-                if estratto and "3334695153" not in estratto:
-                    cliente_finale = f"{estratto} (via Andrea)"
+            else:
+                match_nome_vocale = re.match(
+                    r"^((?:[A-ZÀ-Ý][a-zà-ù'\-]+\s+){1,3})(?=[Nn]°?\s*\d|\d|kg\b|pz\b|pezzi\b)",
+                    text_to_parse or ""
+                )
+                if match_nome_vocale:
+                    estratto = match_nome_vocale.group(1).strip()
 
-        return {
+            if estratto and "3334695153" not in estratto and "224257489502407" not in estratto:
+                cliente_finale = f"{estratto} (via Andrea)"
+
+        singolo_ordine = {
             "is_order": not is_canc and len(prodotti_trovati) > 0,
             "is_cancelled": is_canc,
             "cliente_id": cliente_finale,
@@ -507,4 +544,9 @@ class AIParser:
             "prodotti": [] if is_canc else prodotti_trovati,
             "note_ordine": "[Annullato dal cliente via WhatsApp]" if is_canc else f"[Parser Locale di Riserva] {text_to_parse}",
             "da_verificare_manualmente": not is_canc and len(prodotti_trovati) == 0
+        }
+
+        return {
+            "testo_trascritto": "",
+            "ordini": [singolo_ordine]
         }

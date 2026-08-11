@@ -2,22 +2,53 @@ import React, { useState, useEffect } from 'react';
 import { Package, Calendar, Clock, Edit3, Trash2, Plus, AlertTriangle, UserCheck, MessageSquare, Search, Sparkles, Mic } from 'lucide-react';
 import { formatDateIT } from '../utils/dateUtils';
 
-// Mini-componente per la singola card dell'ordine
+// Il Caciocavallo Silano DOP è l'unico prodotto per cui lotto e grammatura vanno
+// inseriti singolarmente per ogni pezzo (i pezzi possono avere pesi diversi tra loro).
+// Per tutti gli altri prodotti, lotto e grammatura sono sempre identici tra le varie
+// istanze dello stesso articolo nello stesso ordine: basta inserirli una sola volta.
+const isCaciocavalloSilanoDop = (prod) => {
+  const nome = (prod?.nome_articolo || prod?.codice_articolo || '').toLowerCase();
+  return nome.includes('caciocavallo silano') || (nome.includes('caciocavallo') && nome.includes('dop'));
+};
+
 const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConfirmId, setDeleteConfirmId }) => {
-  const [lotto, setLotto] = useState(ord.numero_lotto || '');
   const [prodotti, setProdotti] = useState(ord.prodotti || []);
 
-  // Sincronizza lo stato se l'ordine viene aggiornato dal server
   useEffect(() => {
     setProdotti(ord.prodotti || []);
-    setLotto(ord.numero_lotto || '');
-  }, [ord.prodotti, ord.numero_lotto]);
+  }, [ord.prodotti]);
 
-  const handleProductChange = (index, field, value) => {
-    const newProd = [...prodotti];
-    newProd[index] = { ...newProd[index], [field]: value };
-    setProdotti(newProd);
+  // Applica lo stesso valore (lotto o grammatura) a tutte le istanze dello stesso prodotto.
+  const handleGroupChange = (indices, field, value) => {
+    setProdotti((prev) => {
+      const newProd = [...prev];
+      indices.forEach((i) => {
+        newProd[i] = { ...newProd[i], [field]: value };
+      });
+      return newProd;
+    });
   };
+
+  // Raggruppa i prodotti per articolo: il Caciocavallo Silano DOP resta sempre come
+  // istanze singole (un gruppo per pezzo), tutti gli altri prodotti vengono raggruppati
+  // insieme così lotto/grammatura si inseriscono una volta sola per tutte le loro istanze.
+  const gruppiProdotti = [];
+  {
+    const indiceGruppoPerChiave = new Map();
+    prodotti.forEach((prod, idx) => {
+      if (isCaciocavalloSilanoDop(prod)) {
+        gruppiProdotti.push({ key: `eccezione-${idx}`, eccezione: true, items: [{ prod, idx }] });
+        return;
+      }
+      const chiave = prod.codice_articolo || prod.nome_articolo || `senza-nome-${idx}`;
+      if (indiceGruppoPerChiave.has(chiave)) {
+        gruppiProdotti[indiceGruppoPerChiave.get(chiave)].items.push({ prod, idx });
+      } else {
+        indiceGruppoPerChiave.set(chiave, gruppiProdotti.length);
+        gruppiProdotti.push({ key: chiave, eccezione: false, items: [{ prod, idx }] });
+      }
+    });
+  }
 
   return (
     <div
@@ -27,7 +58,6 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           : 'border-petruzzi-300/80 bg-white/95 hover:border-petruzzi-400'
       }`}
     >
-      {/* Colonna Sinistra: Info Cliente */}
       <div className="w-full lg:w-64 shrink-0 space-y-3 pb-4 lg:pb-0 border-b lg:border-b-0 lg:border-r border-petruzzi-200 lg:pr-6 flex flex-col justify-between">
         <div>
           <div className="flex items-center justify-between lg:block">
@@ -58,10 +88,9 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
         </div>
       </div>
 
-      {/* Colonna Centrale: Prodotti & Campi In Linea */}
       <div className="flex-1 space-y-3 min-w-0">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-black text-petruzzi-800 uppercase tracking-wider">Articoli Ordinati:</span>
+          <span className="text-xs font-black text-petruzzi-800 uppercase tracking-wider">Articoli Ordinati e Organizzati:</span>
           <span className="text-[11px] font-extrabold text-petruzzi-700 bg-petruzzi-100 px-2 py-0.5 rounded-full border border-petruzzi-300">
             {prodotti ? prodotti.length : 0} voci
           </span>
@@ -69,76 +98,77 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
 
         <div className="bg-petruzzi-50/90 rounded-2xl p-3 border border-petruzzi-300/80 divide-y divide-petruzzi-200/80 shadow-inner max-h-64 overflow-y-auto">
           {prodotti && prodotti.length > 0 ? (
-            prodotti.map((prod, idx) => (
-              <div key={idx} className="py-3 flex flex-col xl:flex-row xl:items-end justify-between gap-3 first:pt-0 last:pb-0">
-                <div className="flex-1 min-w-0 mb-1">
-                  <span className="font-extrabold text-petruzzi-950 text-sm truncate block">{prod.nome_articolo || prod.codice_articolo}</span>
-                </div>
-                
-                <div className="flex items-end gap-2 shrink-0 flex-wrap justify-end">
-                  
-                  {/* Blocco Quantità con etichetta */}
-                  <div className="flex flex-col items-start">
-                    <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Quantità</label>
-                    <span className="flex items-center justify-center h-[26px] font-black text-petruzzi-950 bg-white px-2.5 rounded-md border border-petruzzi-300 shadow-sm text-[11px] whitespace-nowrap">
-                      {prod.quantita} {prod.unita_di_misura}
-                    </span>
+            gruppiProdotti.map((gruppo) => {
+              const primo = gruppo.items[0].prod;
+              const indici = gruppo.items.map((it) => it.idx);
+
+              return (
+                <div key={gruppo.key} className="py-3 flex flex-col xl:flex-row xl:items-end justify-between gap-3 first:pt-0 last:pb-0">
+                  <div className="flex-1 min-w-0 mb-1">
+                    <span className="font-extrabold text-petruzzi-950 text-sm truncate block">{primo.nome_articolo || primo.codice_articolo}</span>
+                    {primo.is_peso_fisso && (
+                      <span className="inline-block mt-1 text-[9px] bg-petruzzi-200 text-petruzzi-800 px-1.5 py-0.5 rounded font-mono uppercase">Peso Fisso ({primo.peso_unitario_kg} KG)</span>
+                    )}
+                    {primo.pezzi_totali && (
+                      <span className="inline-block mt-1 text-[9px] bg-petruzzi-100 text-petruzzi-700 px-1.5 py-0.5 rounded font-mono uppercase ml-1">Pezzo {primo.pezzo_index} di {primo.pezzi_totali}</span>
+                    )}
+                    {!gruppo.eccezione && gruppo.items.length > 1 && (
+                      <span className="inline-block mt-1 text-[9px] bg-petruzzi-100 text-petruzzi-700 px-1.5 py-0.5 rounded font-mono uppercase ml-1">{gruppo.items.length} voci · stesso lotto</span>
+                    )}
                   </div>
-                  
-                  {ord.stato_ordine !== 'CONFERMATO' ? (
-                    <>
-                      <div className="flex flex-col items-start">
-                        <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Lotto Art.</label>
+
+                  <div className="flex items-end gap-2 shrink-0 flex-wrap justify-end">
+                    <div className="flex flex-col items-start">
+                      <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Quantità</label>
+                      <div className="flex flex-wrap gap-1 justify-end max-w-[160px]">
+                        {gruppo.items.map(({ prod, idx }) => (
+                          <span key={idx} className="flex items-center justify-center h-[26px] font-black text-petruzzi-950 bg-white px-2.5 rounded-md border border-petruzzi-300 shadow-sm text-[11px] whitespace-nowrap">
+                            {prod.quantita} {prod.unita_di_misura}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-start">
+                      <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Lotto Art.</label>
+                      {ord.stato_ordine !== 'CONFERMATO' ? (
                         <input
                           type="text"
-                          placeholder="Vuoto=Gen."
-                          value={prod.numero_lotto || ''}
-                          onChange={(e) => handleProductChange(idx, 'numero_lotto', e.target.value.toUpperCase())}
-                          className="w-20 h-[26px] px-2 text-[10px] font-mono font-semibold bg-white border border-petruzzi-300 rounded-md focus:ring-1 focus:ring-petruzzi-700 outline-none shadow-sm placeholder-petruzzi-400"
-                          title="Lotto specifico (lascia vuoto per usare quello generale a destra)"
+                          placeholder="Inserisci lotto"
+                          value={primo.numero_lotto || ''}
+                          onChange={(e) => handleGroupChange(indici, 'numero_lotto', e.target.value.toUpperCase())}
+                          className="w-24 h-[26px] px-2 text-[10px] font-mono font-semibold bg-white border border-petruzzi-300 rounded-md focus:ring-1 focus:ring-petruzzi-700 outline-none shadow-sm placeholder-petruzzi-400"
                         />
-                      </div>
-                      <div className="flex flex-col items-start">
-                        <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Grammatura</label>
+                      ) : (
+                        <span className="flex items-center h-[26px] text-[10px] font-mono font-bold text-petruzzi-700 bg-petruzzi-100 px-2 rounded-md border border-petruzzi-200">{primo.numero_lotto || '-'}</span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col items-start">
+                      <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Grammatura</label>
+                      {ord.stato_ordine !== 'CONFERMATO' && !primo.is_peso_fisso ? (
                         <input
                           type="text"
-                          placeholder="Es. 0.250 KG"
-                          value={prod.grammatura || ''}
-                          onChange={(e) => handleProductChange(idx, 'grammatura', e.target.value)}
-                          className="w-24 h-[26px] px-2 text-[10px] font-semibold bg-white border border-petruzzi-300 rounded-md focus:ring-1 focus:ring-petruzzi-700 outline-none shadow-sm placeholder-petruzzi-400"
-                          title="Inserisci la grammatura (es. 0.250 KG)"
+                          placeholder="Inserisci kg"
+                          value={primo.grammatura || ''}
+                          onChange={(e) => handleGroupChange(indici, 'grammatura', e.target.value)}
+                          className="w-24 h-[26px] px-2 text-[10px] font-semibold bg-white border border-amber-400 rounded-md focus:ring-1 focus:ring-petruzzi-700 outline-none shadow-sm placeholder-petruzzi-400"
                         />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {prod.numero_lotto && (
-                        <div className="flex flex-col items-start">
-                          <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Lotto Art.</label>
-                          <span className="flex items-center h-[26px] text-[10px] font-mono font-bold text-petruzzi-700 bg-petruzzi-100 px-2 rounded-md border border-petruzzi-200">
-                            {prod.numero_lotto}
-                          </span>
-                        </div>
+                      ) : (
+                        <span className="flex items-center justify-center w-24 h-[26px] text-[10px] font-bold text-gray-500 bg-gray-100 px-2 rounded-md border border-gray-200">
+                          {primo.grammatura || '-'}
+                        </span>
                       )}
-                      {prod.grammatura && (
-                        <div className="flex flex-col items-start">
-                          <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Grammatura</label>
-                          <span className="flex items-center h-[26px] text-[10px] font-bold text-petruzzi-700 bg-petruzzi-100 px-2 rounded-md border border-petruzzi-200">
-                            {prod.grammatura}
-                          </span>
-                        </div>
-                      )}
-                    </>
-                  )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <p className="text-xs text-petruzzi-600 italic">Nessun prodotto estratto dal testo.</p>
           )}
         </div>
 
-        {/* Trascrizione Vocale */}
         {ord.testo_originale && (ord.testo_originale.includes('VOCALE') || ord.testo_originale.includes('🎙️')) && (
           <div className="bg-amber-100/90 p-3 rounded-xl border border-amber-300 flex items-start space-x-2 text-xs text-amber-950">
             <Mic className="w-4 h-4 text-amber-800 shrink-0 mt-0.5" />
@@ -149,7 +179,6 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           </div>
         )}
 
-        {/* Note Consegna */}
         {ord.note_ordine && (
           <div className="bg-petruzzi-100/90 p-3 rounded-xl border border-petruzzi-300 text-xs text-petruzzi-950">
             <div className="flex items-center space-x-1.5 font-black text-petruzzi-900 mb-0.5 text-[11px]">
@@ -161,9 +190,7 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
         )}
       </div>
 
-      {/* Colonna Destra: Lotto & Conferma */}
       <div className="w-full lg:w-56 shrink-0 pt-4 lg:pt-0 border-t lg:border-t-0 lg:border-l border-petruzzi-200 lg:pl-6 flex flex-col justify-center space-y-3">
-        
         {ord.stato_ordine === 'CONFERMATO' ? (
           <div className="p-3 bg-emerald-100 border border-emerald-300 rounded-2xl text-center space-y-1 shadow-sm">
             <span className="flex items-center justify-center space-x-1.5 text-xs font-black text-emerald-900">
@@ -175,17 +202,8 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           </div>
         ) : (
           <div className="space-y-2 bg-petruzzi-50/50 p-2 rounded-2xl border border-petruzzi-200">
-            {/* Casella Lotto Unico per l'ordine */}
-            <input
-              type="text"
-              placeholder="Lotto per tutti..."
-              value={lotto}
-              onChange={(e) => setLotto(e.target.value.toUpperCase())}
-              className="w-full px-3 py-2 text-xs font-bold font-mono text-center text-petruzzi-900 bg-white border border-petruzzi-300 rounded-xl focus:ring-1 focus:ring-petruzzi-700 outline-none shadow-sm placeholder-petruzzi-400"
-              title="Lotto di base. Verrà applicato a tutti i prodotti che non hanno un lotto specifico inserito."
-            />
             <button
-              onClick={() => onConfirmOrder && onConfirmOrder(ord.id, lotto, prodotti)}
+              onClick={() => onConfirmOrder && onConfirmOrder(ord.id, '', prodotti)}
               className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs rounded-xl shadow-md transition transform active:scale-95 flex items-center justify-center space-x-2"
             >
               <UserCheck className="w-4 h-4 stroke-[2.5]" />
@@ -200,7 +218,6 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-center py-2 px-2 rounded-xl bg-petruzzi-100 hover:bg-petruzzi-200 text-petruzzi-950 font-extrabold text-xs border border-petruzzi-300 transition"
-            title="Download PDF"
           >
             <span>📄 PDF</span>
           </a>
@@ -208,7 +225,6 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           <button
             onClick={() => onEditOrder(ord)}
             className="flex items-center justify-center py-2 px-2 rounded-xl bg-petruzzi-800 hover:bg-petruzzi-900 text-white font-black text-xs transition shadow-sm"
-            title="Modifica Ordine"
           >
             <Edit3 className="w-4 h-4 text-petruzzi-300" />
           </button>
@@ -216,7 +232,6 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           <button
             onClick={() => setDeleteConfirmId(ord.id)}
             className="flex items-center justify-center py-2 px-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-800 font-extrabold text-xs border border-red-300 transition"
-            title="Annulla Ordine"
           >
             <Trash2 className="w-4 h-4" />
           </button>
