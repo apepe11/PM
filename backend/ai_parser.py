@@ -202,9 +202,10 @@ class AIParser:
         {regole_cliente}
         {campioni_block}
 
-        MAPPATURA PRODOTTI: 
+        MAPPATURA E GESTIONE RESI/SOSTITUZIONI (TASSATIVO): 
         1. Usa ESATTAMENTE Codice e Nome dal catalogo. Sole 365 -> STRACPE sfusa.
         2. Pezzi/vaschette/coppie -> "pezzi". Grammi sfusi -> "kg" (500g = 0.5kg). Specifica "grammatura" solo se formati speciali richiesti (es. 250gr).
+        3. GESTIONE RESI E CAMBI: Se il cliente segnala di voler rendere o cambiare parte della merce (es. "rendo 2 ricottine e le sostituisco con 2 fresche" oppure "1kg è da cambiare"), calcola SEMPRE e SOLO il saldo netto finale dei prodotti da consegnare. NON duplicare mai le voci e non inserire i resi come quantità positive aggiuntive. Riassumi i dettagli testuali del cambio nel campo "note_ordine".
 
         SCHEMA JSON DA RISPETTARE:
         {{

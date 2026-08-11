@@ -61,8 +61,10 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
       <div className="w-full lg:w-64 shrink-0 space-y-3 pb-4 lg:pb-0 border-b lg:border-b-0 lg:border-r border-petruzzi-200 lg:pr-6 flex flex-col justify-between">
         <div>
           <div className="flex items-center justify-between lg:block">
-            <h3 className="font-black text-petruzzi-950 text-xl tracking-tight leading-snug">{ord.mittente}</h3>
-            {ord.da_verificare_manualmente && (
+            <h3 className="font-black text-petruzzi-950 text-xl tracking-tight leading-snug">
+              {ord.mittente ? ord.mittente.split('(')[0].trim() : ''}
+            </h3> 
+           {ord.da_verificare_manualmente && (
               <span className="lg:mt-2 inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-200 text-amber-950 text-[11px] font-black uppercase border border-amber-400 shadow-sm animate-pulse">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-800" />
                 <span>Da Verificare</span>

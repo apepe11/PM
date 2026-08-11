@@ -14,8 +14,28 @@
     "n": "Andrea Aliandro",
     "t": "+393334695153",
     "p": "Titolare del Caseificio Petruzzi. Gli ordini inviati da Andrea Aliandro hanno priorità alta ed appartengono alla produzione interna. • : Mozz delatt. N4 Scamorze. N4 • : Ordine Mozz. N7 Nodini. N6 Mozzdelatt. N7 Scamorze. N8 Scam delatt. N4 Ricotta.  N4 Ricotta delatt.  N2 • : Ordine interno • : Pergola",
-    "ultimo_ordine": "2026-08-11 14:46:31",
+    "ultimo_ordine": "2026-08-11 15:04:14",
     "storico_ordini_esempi": [
+      {
+        "data": "2026-08-11 15:04:14",
+        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Taste, 13.08.26, ordine N 12 caciocavallo N 6 cacio silano dop\"",
+        "traduzione_ia": [
+          {
+            "codice_articolo": "CACBIPE",
+            "nome_articolo": "Caciocavallo PETRUZZI",
+            "quantita": 12,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          },
+          {
+            "codice_articolo": "CACSDPE",
+            "nome_articolo": "Caciocavallo Silano DOP PETRUZZI",
+            "quantita": 6,
+            "unita_di_misura": "pezzi",
+            "grammatura": ""
+          }
+        ]
+      },
       {
         "data": "2026-08-11 14:32:28",
         "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Pergola\"",
@@ -197,7 +217,7 @@
     "n": "Antonella",
     "t": "+393287546602",
     "p": "• : 2 coppia scamorza \n1 burrata \n1 mozzarella senza lattosio \n3 bocconcini \n2 nodini \n1 ricotta • [Note 2026-08-11]: [Parser Locale di Riserva] 2 coppia scamorza \n1 burrata \n1 mozzarella senza lattosio \n3 bocconcini \n2 nodini \n1 ricotta",
-    "ultimo_ordine": "2026-08-11 14:58:31",
+    "ultimo_ordine": "2026-08-11 15:11:15",
     "storico_ordini_esempi": [
       {
         "data": "2026-08-11 14:58:31",
@@ -664,7 +684,7 @@
   {
     "n": "Marco Guerra (via Andrea)",
     "p": "[Note 2026-08-11]: [Parser Locale di Riserva] Ordine Marco Guerra\nN 8 trecce confezionate \nN 6 caciocavallo",
-    "ultimo_ordine": "2026-08-11 14:48:31",
+    "ultimo_ordine": "2026-08-11 15:06:14",
     "storico_ordini_esempi": [
       {
         "data": "2026-08-11 14:48:31",
