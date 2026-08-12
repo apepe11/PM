@@ -5,6 +5,7 @@ import subprocess
 import logging
 import re
 from datetime import datetime
+from xml.sax.saxutils import escape as _xml_escape
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
@@ -13,13 +14,34 @@ from reportlab.lib.units import cm
 
 LOGO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "images", "logo.png"))
 
+
+def _safe_text(value) -> str:
+    """
+    Esegue l'escape XML di qualunque testo LIBERO (proveniente da clienti via WhatsApp/IA:
+    mittente, note_ordine, nome_articolo, grammatura, numero_lotto, ecc.) prima di inserirlo
+    in una stringa che verrà passata a un Paragraph di ReportLab.
+
+    ReportLab interpreta i Paragraph come markup simil-XML (<b>, <br/>, <font>...): se il testo
+    libero contiene simboli come '<', '>' o '&' non escapati (es. "Xké me ho 1 <tag non chiuso"),
+    il parser interno solleva un ValueError e l'intera generazione del PDF si interrompe.
+    Va quindi SEMPRE applicato ai valori dinamici, MAI ai tag strutturali (<b>, <br/>) che
+    scriviamo noi nel codice.
+    """
+    if value is None:
+        return ""
+    return _xml_escape(str(value))
+
 def apri_file_nativo_os(filepath: str) -> bool:
     """Apre nativamente 1-Click il file PDF generato con l'applicazione predefinita di sistema (xdg-open / os.startfile / open)."""
     if not filepath or not os.path.exists(filepath):
         return False
     try:
         if sys.platform.startswith('win'):
-            os.startfile(filepath)
+            # os.startfile esiste SOLO su Windows: su Linux/Mac non è nemmeno negli stub di
+            # typeshed, quindi Pylance lo segnala come "attributo sconosciuto" anche se qui è
+            # correttamente protetto a runtime dal controllo su sys.platform. Usiamo getattr()
+            # per evitare l'accesso statico all'attributo e zittire il falso positivo.
+            getattr(os, "startfile")(filepath)
         elif sys.platform.startswith('darwin'):
             subprocess.Popen(['open', filepath])
         else: # Linux
@@ -139,8 +161,8 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
         tot_kg = _safe_float(prod.get("quantita_totale", prod.get("totale_kg", 0)))
         n_ordini = _safe_float(prod.get("numero_ordini", prod.get("totale_pezzi", 0)))
         data_table.append([
-            Paragraph(str(prod.get("codice_articolo", prod.get("codice", ""))), cell_style),
-            Paragraph(str(prod.get("nome_prodotto", prod.get("nome", ""))), cell_style),
+            Paragraph(_safe_text(prod.get("codice_articolo", prod.get("codice", ""))), cell_style),
+            Paragraph(_safe_text(prod.get("nome_prodotto", prod.get("nome", ""))), cell_style),
             Paragraph(f"<b>{tot_kg:.2f} KG</b>", cell_style),
             Paragraph(f"<b>{n_ordini:.0f}</b>", cell_style)
         ])
@@ -194,13 +216,13 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
             Paragraph("CASEIFICIO PETRUZZI DAL 1923", title_style),
             Spacer(1, 0.1*cm),
             Paragraph(f"RICEVUTA ORDINE E BOLLA CONFEZIONAMENTO #{ordine.get('id','')}", sub_style),
-            Paragraph(f"Cliente: <b>{ordine.get('mittente','')}</b> | Data Consegna: <b>{data_cons_formatted}</b>", sub_style)
+            Paragraph(f"Cliente: <b>{_safe_text(ordine.get('mittente',''))}</b> | Data Consegna: <b>{data_cons_formatted}</b>", sub_style)
         ]
         header_table = Table([[img, header_text]], colWidths=[3.0*cm, 15.0*cm])
         story.append(header_table)
     else:
         story.append(Paragraph("CASEIFICIO PETRUZZI DAL 1923", title_style))
-        story.append(Paragraph(f"RICEVUTA ORDINE #{ordine.get('id','')} - {ordine.get('mittente','')}", sub_style))
+        story.append(Paragraph(f"RICEVUTA ORDINE #{ordine.get('id','')} - {_safe_text(ordine.get('mittente',''))}", sub_style))
 
     story.append(Spacer(1, 0.4*cm))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#d97706'), spaceBefore=1, spaceAfter=12))
@@ -220,10 +242,10 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
     for p in ordine.get('prodotti', []):
         data_tab.append([
             Paragraph(str(p.get("codice_articolo", "")), cell_norm),
-            Paragraph(str(p.get("nome_articolo", "") or p.get("codice_articolo", "")), cell_norm),
-            Paragraph(f"{p.get('quantita', 1.0)} {p.get('unita_di_misura', 'kg')}", cell_norm),
-            Paragraph(f"<b>{p.get('grammatura', '-')}</b>", cell_bold),
-            Paragraph(f"<b>{p.get('numero_lotto') or lotto_gen}</b>", cell_bold)
+            Paragraph(_safe_text(p.get("nome_articolo", "") or p.get("codice_articolo", "")), cell_norm),
+            Paragraph(f"{p.get('quantita', 1.0)} {_safe_text(p.get('unita_di_misura', 'kg'))}", cell_norm),
+            Paragraph(f"<b>{_safe_text(p.get('grammatura', '-'))}</b>", cell_bold),
+            Paragraph(f"<b>{_safe_text(p.get('numero_lotto') or lotto_gen)}</b>", cell_bold)
         ])
 
     table = Table(data_tab, colWidths=[3.0*cm, 7.0*cm, 2.5*cm, 3.0*cm, 2.5*cm])
@@ -237,7 +259,7 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
 
     if ordine.get("note_ordine"):
         story.append(Spacer(1, 0.4*cm))
-        story.append(Paragraph(f"<b>Note Ordine:</b> {ordine.get('note_ordine')}", sub_style))
+        story.append(Paragraph(f"<b>Note Ordine:</b> {_safe_text(ordine.get('note_ordine'))}", sub_style))
 
     doc.build(story)
     return buffer.getvalue()
@@ -290,11 +312,11 @@ def genera_pdf_filoni(data_str: str, clienti_filoni: list) -> bytes:
     ]
 
     for c in clienti_filoni:
-        prods_str = "<br/>".join([f"• {p.get('nome_articolo') or p.get('codice_articolo')}: <b>{p.get('quantita')} {p.get('unita_di_misura')}</b>" for p in c.get('prodotti_filoni', [])])
+        prods_str = "<br/>".join([f"• {_safe_text(p.get('nome_articolo') or p.get('codice_articolo'))}: <b>{p.get('quantita')} {_safe_text(p.get('unita_di_misura'))}</b>" for p in c.get('prodotti_filoni', [])])
         data_tab.append([
-            Paragraph(f"<b>{c.get('mittente','')}</b>", cell_bold),
+            Paragraph(f"<b>{_safe_text(c.get('mittente',''))}</b>", cell_bold),
             Paragraph(prods_str, cell_norm),
-            Paragraph(c.get("note_ordine") or "-", cell_norm)
+            Paragraph(_safe_text(c.get("note_ordine")) or "-", cell_norm)
         ])
 
     table = Table(data_tab, colWidths=[5.0*cm, 8.0*cm, 5.0*cm])
@@ -365,7 +387,7 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
 
     for idx, o in enumerate(ordini_confezionati, 1):
         prods_str = "<br/>".join([
-            f"• {p.get('nome_articolo') or p.get('codice_articolo')}: {p.get('quantita')} {p.get('unita_di_misura')} ({p.get('grammatura','-')})"
+            f"• {_safe_text(p.get('nome_articolo') or p.get('codice_articolo'))}: {p.get('quantita')} {_safe_text(p.get('unita_di_misura'))} ({_safe_text(p.get('grammatura','-'))})"
             for p in o.get('prodotti', [])
         ])
         peso_raw = o.get('peso_reale')
@@ -375,10 +397,10 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
             peso_str = "<b>-</b>"
         data_tab.append([
             Paragraph(f"#{idx}", cell_norm),
-            Paragraph(f"<b>{o.get('mittente','')}</b><br/><font size=7 color='#666666'>{o.get('note_ordine','')}</font>", cell_norm),
+            Paragraph(f"<b>{_safe_text(o.get('mittente',''))}</b><br/><font size=7 color='#666666'>{_safe_text(o.get('note_ordine',''))}</font>", cell_norm),
             Paragraph(prods_str or "-", cell_norm),
             Paragraph(peso_str, cell_bold),
-            Paragraph(f"<b>{o.get('numero_lotto') or '-'}</b>", cell_bold)
+            Paragraph(f"<b>{_safe_text(o.get('numero_lotto') or '-')}</b>", cell_bold)
         ])
 
     table = Table(data_tab, colWidths=[1.0*cm, 4.5*cm, 7.5*cm, 2.5*cm, 2.5*cm])
@@ -445,11 +467,11 @@ def genera_pdf_ordini_generale(data_str: str, ordini: list) -> bytes:
     ]
 
     for o in ordini:
-        prods_str = "<br/>".join([f"• {p.get('nome_articolo') or p.get('codice_articolo')}: <b>{p.get('quantita')} {p.get('unita_di_misura')}</b>" for p in o.get('prodotti', [])])
+        prods_str = "<br/>".join([f"• {_safe_text(p.get('nome_articolo') or p.get('codice_articolo'))}: <b>{p.get('quantita')} {_safe_text(p.get('unita_di_misura'))}</b>" for p in o.get('prodotti', [])])
         data_tab.append([
-            Paragraph(f"<b>{o.get('mittente','')}</b>", cell_bold),
+            Paragraph(f"<b>{_safe_text(o.get('mittente',''))}</b>", cell_bold),
             Paragraph(prods_str, cell_norm),
-            Paragraph(o.get("note_ordine") or "-", cell_norm)
+            Paragraph(_safe_text(o.get("note_ordine")) or "-", cell_norm)
         ])
 
     table = Table(data_tab, colWidths=[5.0*cm, 8.0*cm, 5.0*cm])
