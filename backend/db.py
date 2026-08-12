@@ -179,81 +179,6 @@ if os.path.exists(CATALOGO_FILE):
     except Exception as e:
         print(f"⚠️ Errore caricamento catalogo in db.py: {e}")
 
-async def registra_o_aggiorna_cliente_json(mittente: str, testo_originale: str, dati_ia: dict):
-    if not mittente or mittente.strip().lower() in ["tu", "you", "banco", "me", "io"]:
-        return
-
-    clean_mittente = mittente.strip()
-    phone_match = re.search(r'(\+?\d[\d\s\.\-\(\)]{6,}\d)', clean_mittente)
-    phone_number = phone_match.group(1).strip() if phone_match else ""
-
-    nome_solo = clean_mittente
-    if phone_number and phone_number in clean_mittente:
-        nome_solo = clean_mittente.replace(phone_number, "").replace("()", "").replace("Cliente WhatsApp", "").strip(" -()_")
-        if not nome_solo:
-            nome_solo = clean_mittente
-
-    try:
-        lista_clienti = []
-        if os.path.exists(PARTICOLARITA_FILE):
-            with open(PARTICOLARITA_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    lista_clienti = data
-        
-        found_client = None
-        nome_solo_lower = nome_solo.lower()
-        
-        for cli in lista_clienti:
-            n_reg = (cli.get("n") or cli.get("nome_cliente") or "").strip().lower()
-            t_reg = (cli.get("t") or cli.get("telefono") or "").strip()
-            
-            if (n_reg and (n_reg in nome_solo_lower or nome_solo_lower in n_reg)) or (phone_number and t_reg and phone_number.replace(" ", "") in t_reg.replace(" ", "")):
-                found_client = cli
-                break
-
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        nuovo_esempio = {
-            "data": now_str,
-            "messaggio_raw": testo_originale[:150],
-            "traduzione_ia": dati_ia.get("prodotti", [])
-        }
-
-        note_ext = (dati_ia.get("note_ordine") or "").strip()
-
-        if found_client:
-            if phone_number and not found_client.get("t"):
-                found_client["t"] = phone_number
-
-            if note_ext and note_ext not in (found_client.get("p") or ""):
-                curr_part = found_client.get("p", "")
-                if curr_part:
-                    found_client["p"] = f"{curr_part} • [Note {now_str[:10]}]: {note_ext}"
-                else:
-                    found_client["p"] = f"[Note {now_str[:10]}]: {note_ext}"
-
-            found_client["ultimo_ordine"] = now_str
-            storico = found_client.setdefault("storico_ordini_esempi", [])
-            if not any(e.get("messaggio_raw") == nuovo_esempio["messaggio_raw"] for e in storico):
-                storico.insert(0, nuovo_esempio)
-                found_client["storico_ordini_esempi"] = storico[:5]
-        else:
-            nuovo_cliente = {
-                "n": nome_solo,
-                "t": phone_number,
-                "rd": "",
-                "md": "",
-                "p": f"Cliente registrato automaticamente da WhatsApp il {now_str[:10]}." + (f" Note: {note_ext}" if note_ext else ""),
-                "ultimo_ordine": now_str,
-                "storico_ordini_esempi": [nuovo_esempio]
-            }
-            lista_clienti.append(nuovo_cliente)
-
-        with open(PARTICOLARITA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(lista_clienti, f, indent=2, ensure_ascii=False)
-            
-    except Exception as e:
-        print(f"⚠️ Errore salvataggio particolarita_clienti.json: {e}")
 async def init_db():
     async with get_db_connection() as db:
         # ABILITIAMO IL WAL PER AZZERARE I BLOCCHI (DATABASE IS LOCKED)
@@ -392,12 +317,6 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             )
             
         await db.commit()
-
-        try:
-            dati_parsed_obj = json.loads(dati_estratti)
-            await registra_o_aggiorna_cliente_json(mittente_finale, nuovo_messaggio, dati_parsed_obj)
-        except Exception:
-            pass   
 
 def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
     """Questa funzione è il fallback se il prodotto non è nel dizionario PRODOTTI_MAP"""
@@ -664,11 +583,6 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
         )
         await db.commit()
         last_id = cursor.lastrowid
-
-        try:
-            await registra_o_aggiorna_cliente_json(mittente, testo_orig, dati_ia)
-        except Exception:
-            pass
 
         return last_id
 

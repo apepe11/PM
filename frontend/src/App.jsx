@@ -297,10 +297,6 @@ export default function App() {
         {activeTab === 'statistiche' && <AnalisiStatistica statistiche={statistiche} />}
       </main>
 
-      <footer className="bg-petruzzi-100/90 border-t border-petruzzi-200 py-4 text-center text-xs text-petruzzi-800 font-medium">
-        <p>Caseificio Petruzzi © {new Date().getFullYear()} — Sistema Event-Driven WhatsApp & IA Gemini Core</p>
-      </footer>
-
       <OrdiniModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}

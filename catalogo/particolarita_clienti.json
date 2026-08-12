@@ -48,107 +48,86 @@
   },
   {
     "n": "Valentina Mannara",
+    "p": "",
     "t": "+65902045327432"
   },
   {
-    "n": "Villa"
+    "n": "Villa",
+    "p": ""
   },
   {
-    "n": "Conad"
+    "n": "Conad",
+    "p": ""
   },
   {
-    "n": "Pianeta catering"
+    "n": "Pianeta catering",
+    "p": ""
   },
   {
     "n": "Cirigliano Donato",
+    "p": "",
     "t": "+34205236989958"
   },
   {
     "n": "Angela",
-    "t": "+242219059523747",
-    "ultimo_ordine": "2026-08-12 18:32:13",
-    "storico_ordini_esempi": [
-      {
-        "data": "2026-08-12 18:32:13",
-        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buongiorno 1.5 kg di mozzarelle 2 coppie di scamorze grazie\"",
-        "traduzione_ia": [
-          {
-            "codice_articolo": "FILMZPE",
-            "nome_articolo": "Filone di mozzarella PETRUZZI",
-            "quantita": 1.5,
-            "unita_di_misura": "kg",
-            "grammatura": ""
-          },
-          {
-            "codice_articolo": "SCABIPE",
-            "nome_articolo": "scamorza bianca PETRUZZI",
-            "quantita": 2,
-            "unita_di_misura": "coppie",
-            "grammatura": ""
-          }
-        ]
-      }
-    ]
+    "p": "",
+    "t": "+242219059523747"
   },
   {
-    "n": "Pergola"
+    "n": "Pergola",
+    "p": ""
   },
   {
     "n": "Giovanni Fiorile",
+    "p": "",
     "t": "+236790271209543"
   },
   {
     "n": "Giuliana Fronzaroli",
+    "p": "",
     "t": "+115131027611727"
   },
   {
     "n": "NAM Supermercati",
-    "t": "+252003112489053",
-    "ultimo_ordine": "2026-08-12 18:42:47",
-    "storico_ordini_esempi": [
-      {
-        "data": "2026-08-12 18:42:47",
-        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"1 ricotta\"",
-        "traduzione_ia": [
-          {
-            "codice_articolo": "RIC",
-            "nome_articolo": "Delat ricotta",
-            "quantita": 1.0,
-            "unita_di_misura": "kg",
-            "grammatura": ""
-          }
-        ]
-      }
-    ]
+    "p": "",
+    "t": "+252003112489053"
   },
   {
     "n": "Annalucia",
-    "t": "+72125452951765",
-    "rd": "",
-    "md": "",
-    "p": "Cliente registrato automaticamente da WhatsApp il 2026-08-12.",
-    "ultimo_ordine": "2026-08-12 18:53:21",
-    "storico_ordini_esempi": [
-      {
-        "data": "2026-08-12 18:53:21",
-        "messaggio_raw": "🎙️ [VOCALE TRASCRITTO]: \"Buonasera 2 stracciatella, 1,5 di ricotta Grazie\"",
-        "traduzione_ia": [
-          {
-            "codice_articolo": "STRACPE",
-            "nome_articolo": "Stracciatella PETRUZZI",
-            "quantita": 2.0,
-            "unita_di_misura": "pezzi",
-            "grammatura": ""
-          },
-          {
-            "codice_articolo": "RIC",
-            "nome_articolo": "Delat ricotta",
-            "quantita": 1.5,
-            "unita_di_misura": "kg",
-            "grammatura": ""
-          }
-        ]
-      }
-    ]
+    "p": "",
+    "t": "+72125452951765"
+  },
+  {
+    "n": "598",
+    "p": ""
+  },
+  {
+    "n": "Taste",
+    "p": ""
+  },
+  {
+    "n": "Carmine",
+    "p": "",
+    "t": "+34699074396409"
+  },
+  {
+    "n": "Simy",
+    "p": "",
+    "t": "+109324198256762"
+  },
+  {
+    "n": "Dina Martoccia",
+    "p": "",
+    "t": "+393404116002"
+  },
+  {
+    "n": "Maria Barbella",
+    "p": "",
+    "t": "+393351765556"
+  },
+  {
+    "n": "Rosa Cel",
+    "p": "",
+    "t": "+393402937885"
   }
 ]
