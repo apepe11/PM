@@ -175,7 +175,7 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           <div className="bg-amber-100/90 p-3 rounded-xl border border-amber-300 flex items-start space-x-2 text-xs text-amber-950">
             <Mic className="w-4 h-4 text-amber-800 shrink-0 mt-0.5" />
             <div>
-              <span className="font-black text-amber-900 block text-[11px]">Vocale Trascritto da Gemini:</span>
+              <span className="font-black text-amber-900 block text-[11px]">Ordine:</span>
               <span className="italic">{ord.testo_originale.replace(/🎙️\s*\[VOCALE TRASCRITTO\]:\s*/, '')}</span>
             </div>
           </div>

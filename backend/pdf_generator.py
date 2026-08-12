@@ -37,10 +37,6 @@ def apri_file_nativo_os(filepath: str) -> bool:
         return False
     try:
         if sys.platform.startswith('win'):
-            # os.startfile esiste SOLO su Windows: su Linux/Mac non è nemmeno negli stub di
-            # typeshed, quindi Pylance lo segnala come "attributo sconosciuto" anche se qui è
-            # correttamente protetto a runtime dal controllo su sys.platform. Usiamo getattr()
-            # per evitare l'accesso statico all'attributo e zittire il falso positivo.
             getattr(os, "startfile")(filepath)
         elif sys.platform.startswith('darwin'):
             subprocess.Popen(['open', filepath])
@@ -135,7 +131,7 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
         ]
         
         header_table = Table([[img, header_text]], colWidths=[3.0*cm, 15.0*cm])
-        header_table.setStyle(TableStyle([
+        header_table.setStyle(TableStyle([  # type: ignore
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (0,0), 'LEFT'),
         ]))
@@ -168,7 +164,7 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
         ])
 
     table = Table(data_table, colWidths=[3.5*cm, 8.5*cm, 3.0*cm, 3.0*cm])
-    table.setStyle(TableStyle([
+    table.setStyle(TableStyle([  # type: ignore
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4e2a1e')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
@@ -249,7 +245,7 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
         ])
 
     table = Table(data_tab, colWidths=[3.0*cm, 7.0*cm, 2.5*cm, 3.0*cm, 2.5*cm])
-    table.setStyle(TableStyle([
+    table.setStyle(TableStyle([  # type: ignore
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#fef3c7')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
         ('TOPPADDING', (0,0), (-1,-1), 6),
@@ -320,7 +316,7 @@ def genera_pdf_filoni(data_str: str, clienti_filoni: list) -> bytes:
         ])
 
     table = Table(data_tab, colWidths=[5.0*cm, 8.0*cm, 5.0*cm])
-    table.setStyle(TableStyle([
+    table.setStyle(TableStyle([  # type: ignore
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#fef3c7')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -366,7 +362,7 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
             Paragraph(f"Generato il: {datetime.now().strftime('%d/%m/%Y alle %H:%M')}", styles['Italic'])
         ]
         header_table = Table([[img, header_text]], colWidths=[3.2*cm, 14.8*cm])
-        header_table.setStyle(TableStyle([
+        header_table.setStyle(TableStyle([  # type: ignore
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (0,0), 'LEFT'),
         ]))
@@ -404,7 +400,7 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
         ])
 
     table = Table(data_tab, colWidths=[1.0*cm, 4.5*cm, 7.5*cm, 2.5*cm, 2.5*cm])
-    table.setStyle(TableStyle([
+    table.setStyle(TableStyle([  # type: ignore
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#d1fae5')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#a7f3d0')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -475,7 +471,7 @@ def genera_pdf_ordini_generale(data_str: str, ordini: list) -> bytes:
         ])
 
     table = Table(data_tab, colWidths=[5.0*cm, 8.0*cm, 5.0*cm])
-    table.setStyle(TableStyle([
+    table.setStyle(TableStyle([  # type: ignore
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#fef3c7')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),

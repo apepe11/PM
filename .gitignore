@@ -20,3 +20,9 @@ __pycache__/
 whatsapp_session/
 
 docker-compose.yml
+
+setup.bat
+
+setup.sh
+
+reports/

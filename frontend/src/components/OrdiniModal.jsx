@@ -9,7 +9,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const [note, setNote] = useState('');
   const [clientiRegistrati, setClientiRegistrati] = useState([]);
   const [prodotti, setProdotti] = useState([
-    { codice_articolo: 'BUFAL', nome_articolo: 'Bufala Campana DOP', quantita: 1, unita_di_misura: 'kg' }
+    { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: 1, unita_di_misura: 'kg' }
   ]);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
       if (editingOrder.prodotti && editingOrder.prodotti.length > 0) {
         setProdotti(editingOrder.prodotti.map(p => ({
           codice_articolo: p.codice_articolo || '',
-          nome_articolo: p.nome_articolo || '',
+          nome_articolo: p.nome_articolo || p.codice_articolo || '',
           quantita: p.quantita || 1,
           unita_di_misura: p.unita_di_misura || 'kg'
         })));
@@ -63,7 +63,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
       setDataConsegna(new Date().toISOString().split('T')[0]);
       setNote('');
       setProdotti([
-        { codice_articolo: 'BUFAL', nome_articolo: 'Bufala Campana DOP', quantita: 1, unita_di_misura: 'kg' }
+        { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: 1, unita_di_misura: 'kg' }
       ]);
     }
   }, [editingOrder, isOpen, clientiRegistrati]);
@@ -73,7 +73,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const handleAddProductRow = () => {
     setProdotti([
       ...prodotti,
-      { codice_articolo: 'TRSCAPE', nome_articolo: 'Treccia di Scamorza Petruzzi', quantita: 1, unita_di_misura: 'kg' }
+      { codice_articolo: 'TRSCAPE', nome_articolo: 'Treccia di Scamorza Petruzzi', quantita: 1, unita_di_misura: 'pezzi' }
     ]);
   };
 
@@ -85,11 +85,15 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const handleProductChange = (index, field, value) => {
     const updated = [...prodotti];
     if (field === 'codice_articolo') {
-      const found = prodottiCatalogo.find(p => p.codice_prodotto === value);
+      // FIX DOPPIA LETTURA: Supporta sia il catalogo con chiavi lunghe (codice_prodotto) sia chiavi corte (c)
+      const found = prodottiCatalogo.find(p => (p.c || p.codice_prodotto) === value);
       updated[index].codice_articolo = value;
+      
       if (found) {
-        updated[index].nome_articolo = found.nome_prodotto;
-        updated[index].unita_di_misura = (found.unita_misura || 'kg').toLowerCase();
+        updated[index].nome_articolo = found.n || found.nome_prodotto || value;
+        // Se c'è un peso (chiave 'p' o non nullo), usa i pezzi di default
+        const hasWeight = found.p !== undefined ? found.p !== null : found.peso_unitario !== null;
+        updated[index].unita_di_misura = hasWeight ? 'pezzi' : 'kg';
       }
     } else if (field === 'quantita') {
       updated[index].quantita = parseFloat(value) || 0;
@@ -226,52 +230,68 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
             </div>
 
             <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-              {prodotti.map((p, idx) => (
-                <div key={idx} className="flex items-center space-x-2 bg-petruzzi-50 p-3 rounded-2xl border border-petruzzi-200">
-                  {/* Select Product Dropdown */}
-                  <select
-                    value={p.codice_articolo}
-                    onChange={(e) => handleProductChange(idx, 'codice_articolo', e.target.value)}
-                    className="flex-1 bg-white border border-petruzzi-300 text-petruzzi-950 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-petruzzi-700 shadow-sm"
-                  >
-                    {prodottiCatalogo.map((catItem) => (
-                      <option key={catItem.codice_prodotto} value={catItem.codice_prodotto}>
-                        {catItem.nome_prodotto} ({catItem.codice_prodotto})
-                      </option>
-                    ))}
-                  </select>
+              {prodotti.map((p, idx) => {
+                // Genera la lista delle opzioni dal catalogo disponibile
+                // Usando un fallback se il prodotto nel database non esiste più nel file JSON.
+                const existsInCatalog = prodottiCatalogo.some(cat => (cat.c || cat.codice_prodotto) === p.codice_articolo);
+                
+                return (
+                  <div key={idx} className="flex items-center space-x-2 bg-petruzzi-50 p-3 rounded-2xl border border-petruzzi-200">
+                    
+                    {/* Select Product Dropdown */}
+                    <select
+                      value={p.codice_articolo}
+                      onChange={(e) => handleProductChange(idx, 'codice_articolo', e.target.value)}
+                      className="flex-1 bg-white border border-petruzzi-300 text-petruzzi-950 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-petruzzi-700 shadow-sm"
+                    >
+                      {/* Se l'articolo è "orfano" o rimosso, mostralo comunque come opzione per non rompere la UI */}
+                      {!existsInCatalog && p.codice_articolo && (
+                        <option value={p.codice_articolo}>{p.nome_articolo || p.codice_articolo} (Non in catalogo)</option>
+                      )}
 
-                  {/* Quantity Input */}
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={p.quantita}
-                    onChange={(e) => handleProductChange(idx, 'quantita', e.target.value)}
-                    className="w-20 bg-white border border-petruzzi-300 text-petruzzi-950 font-black text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
-                  />
+                      {prodottiCatalogo.map((catItem) => {
+                        const code = catItem.c || catItem.codice_prodotto;
+                        const name = catItem.n || catItem.nome_prodotto;
+                        return (
+                          <option key={code} value={code}>
+                            {name}
+                          </option>
+                        );
+                      })}
+                    </select>
 
-                  {/* Unit of Measure Select */}
-                  <select
-                    value={p.unita_di_misura}
-                    onChange={(e) => handleProductChange(idx, 'unita_di_misura', e.target.value)}
-                    className="w-20 bg-white border border-petruzzi-300 text-petruzzi-800 uppercase font-bold text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
-                  >
-                    <option value="kg">KG</option>
-                    <option value="pezzi">PZ</option>
-                  </select>
+                    {/* Quantity Input */}
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={p.quantita}
+                      onChange={(e) => handleProductChange(idx, 'quantita', e.target.value)}
+                      className="w-20 bg-white border border-petruzzi-300 text-petruzzi-950 font-black text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
+                    />
 
-                  {/* Remove Row Button */}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveProductRow(idx)}
-                    disabled={prodotti.length === 1}
-                    className="p-2 rounded-xl text-petruzzi-600 hover:text-red-700 disabled:opacity-30 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
+                    {/* Unit of Measure Select */}
+                    <select
+                      value={p.unita_di_misura}
+                      onChange={(e) => handleProductChange(idx, 'unita_di_misura', e.target.value)}
+                      className="w-20 bg-white border border-petruzzi-300 text-petruzzi-800 uppercase font-bold text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
+                    >
+                      <option value="kg">KG</option>
+                      <option value="pezzi">PZ</option>
+                    </select>
+
+                    {/* Remove Row Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveProductRow(idx)}
+                      disabled={prodotti.length === 1}
+                      className="p-2 rounded-xl text-petruzzi-600 hover:text-red-700 disabled:opacity-30 transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

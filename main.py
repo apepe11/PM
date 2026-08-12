@@ -149,11 +149,11 @@ async def svuota_database_endpoint():
 async def list_ordini(data: Optional[str] = Query(None), scomponi_pezzi: bool = Query(False)):
     # Di default NON include i messaggi non riconosciuti come ordine (0 prodotti,
     # non annullati) - vedi /api/ordini/da-verificare per quelli.
-    return await get_tutti_ordini(data, scomponi_pezzi=scomponi_pezzi, includi_non_ordini=False)
+    return await get_tutti_ordini(data, scomponi_pezzi=scomponi_pezzi, includi_non_ordini=False)  # type: ignore
 
 @app.get("/api/ordini/da-verificare")
 async def list_ordini_da_verificare(data: Optional[str] = Query(None)):
-    tutti = await get_tutti_ordini(data, includi_non_ordini=True)
+    tutti = await get_tutti_ordini(data, includi_non_ordini=True)  # type: ignore
     return [o for o in tutti if not o.get("is_order", True) and not o.get("is_cancelled") and len(o.get("prodotti", [])) == 0]
 
 @app.post("/api/ordini/rielabora-tutti")
@@ -171,7 +171,7 @@ async def unlock_confezionamento(id_ordine: int):
 
 @app.get("/api/broadcast/liste")
 async def list_broadcast_liste():
-    return await get_broadcast_liste()
+    return await get_broadcast_liste()  # type: ignore
 
 @app.post("/api/broadcast/liste")
 async def save_broadcast_lista(payload: dict = Body(...)):
@@ -189,7 +189,7 @@ async def delete_broadcast_lista(id_lista: int):
 
 @app.get("/api/broadcast/schedulati")
 async def list_broadcast_schedulati():
-    return await get_broadcast_schedulati()
+    return await get_broadcast_schedulati()  # type: ignore
 
 @app.post("/api/broadcast/schedulati")
 async def schedule_broadcast(payload: dict = Body(...)):
@@ -210,7 +210,7 @@ async def delete_broadcast_schedulato(id_sched: int):
 
 @app.get("/api/broadcast/logs")
 async def list_broadcast_logs():
-    return await get_broadcast_logs()
+    return await get_broadcast_logs()  # type: ignore
 
 @app.delete("/api/broadcast/logs/{id_log}")
 async def delete_broadcast_log(id_log: int):
@@ -250,7 +250,7 @@ async def remove_ordine(id_ordine: int):
 
 @app.get("/api/produzione")
 async def list_produzione(data: Optional[str] = Query(None)):
-    return await get_produzione_aggregata(data)
+    return await get_produzione_aggregata(data)  # type: ignore
 
 @app.get("/api/statistiche")
 async def get_stats(periodo_tipo: str = Query("mensile"), periodo_valore: Optional[str] = Query(None)):
@@ -258,7 +258,8 @@ async def get_stats(periodo_tipo: str = Query("mensile"), periodo_valore: Option
 
 @app.get("/api/prodotti")
 async def list_prodotti():
-    catalog_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "catalogo", "catalogo_prodotti.json"))
+    # FIX: Puntamento corretto al nuovo file "catalogo.json"
+    catalog_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "catalogo", "catalogo.json"))
     if os.path.exists(catalog_path):
         with open(catalog_path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -278,7 +279,7 @@ def salva_e_apri_pdf_temp(pdf_bytes: bytes, filename: str):
 @app.get("/api/pdf/produzione")
 async def download_pdf_produzione(data: Optional[str] = Query(None)):
     target_data = data or await get_data_attiva()
-    lista_prod = await get_produzione_aggregata(target_data)
+    lista_prod = await get_produzione_aggregata(target_data)  # type: ignore
     pdf_bytes = genera_pdf_produzione_totale(target_data, lista_prod)
     salva_e_apri_pdf_temp(pdf_bytes, f"produzione_petruzzi_{target_data}.pdf")
     return Response(
@@ -289,7 +290,7 @@ async def download_pdf_produzione(data: Optional[str] = Query(None)):
 
 @app.get("/api/pdf/ordine/{id_ordine}")
 async def download_pdf_ordine(id_ordine: int):
-    ordini = await get_tutti_ordini()
+    ordini = await get_tutti_ordini()  # type: ignore
     target_ord = next((o for o in ordini if o["id"] == id_ordine), None)
     if not target_ord:
         raise HTTPException(status_code=404, detail="Ordine non trovato")
@@ -305,7 +306,7 @@ async def download_pdf_ordine(id_ordine: int):
 @app.get("/api/pdf/ordini-generale")
 async def download_pdf_ordini_generale(data: Optional[str] = Query(None)):
     target_date = data or await get_data_attiva()
-    ordini = await get_tutti_ordini(target_date)
+    ordini = await get_tutti_ordini(target_date)  # type: ignore
     ordini_attivi = [o for o in ordini if not o.get('is_cancelled') and o.get('stato_ordine') != 'ANNULLATO']
     
     pdf_bytes = genera_pdf_ordini_generale(target_date, ordini_attivi)
@@ -319,12 +320,12 @@ async def download_pdf_ordini_generale(data: Optional[str] = Query(None)):
 
 @app.get("/api/filoni")
 async def list_filoni(data: Optional[str] = Query(None)):
-    return await get_filoni_per_cliente(data)
+    return await get_filoni_per_cliente(data)  # type: ignore
 
 @app.get("/api/pdf/filoni")
 async def download_pdf_filoni(data: Optional[str] = Query(None)):
     target_data = data or await get_data_attiva()
-    lista_filoni = await get_filoni_per_cliente(target_data)
+    lista_filoni = await get_filoni_per_cliente(target_data)  # type: ignore
     pdf_bytes = genera_pdf_filoni(target_data, lista_filoni)
     salva_e_apri_pdf_temp(pdf_bytes, f"filoni_pizzeria_{target_data}.pdf")
     return Response(
@@ -336,7 +337,7 @@ async def download_pdf_filoni(data: Optional[str] = Query(None)):
 @app.get("/api/pdf/ordini-confezionati-banco")
 async def download_pdf_ordini_confezionati_banco(data: Optional[str] = Query(None)):
     target_data = data or await get_data_attiva()
-    ordini = await get_tutti_ordini(target_data)
+    ordini = await get_tutti_ordini(target_data)  # type: ignore
     conf_list = [o for o in ordini if o.get('stato_confezionamento') == 'CONFEZIONATO' or o.get('stato_ordine') == 'CONFERMATO']
     pdf_bytes = genera_pdf_ordini_confezionati_banco(target_data, conf_list)
     salva_e_apri_pdf_temp(pdf_bytes, f"riepilogo_banco_confezionati_{target_data}.pdf")
@@ -348,7 +349,7 @@ async def download_pdf_ordini_confezionati_banco(data: Optional[str] = Query(Non
 
 @app.get("/api/clienti")
 async def list_clienti():
-    return await get_lista_clienti_registrati()
+    return await get_lista_clienti_registrati()  # type: ignore
 
 # --- MODIFICA FONDAMENTALE: L'API prende una lista di prodotti pesati ---
 @app.put("/api/ordini/{id_ordine}/confezione")
@@ -383,14 +384,46 @@ async def download_db_backup(token: Optional[str] = Query(None)):
         media_type="application/x-sqlite3"
     )
 
+
+@app.get("/api/pdf/sole")
+async def download_pdf_sole(data: Optional[str] = Query(None)):
+    target_date = data or await get_data_attiva()
+    ordini = await get_tutti_ordini(target_date) 
+    
+    # 📱 Stessi numeri di telefono del frontend
+    numeri_sole_365 = ['3284344912', '181208998756424']
+    ordini_sole = []
+    
+    for o in ordini:
+        if o.get('is_cancelled') or o.get('stato_ordine') == 'ANNULLATO':
+            continue
+        
+        mittente_str = str(o.get('mittente', '')).lower()
+        is_sole_by_name = 'sole' in mittente_str or '365' in mittente_str
+        is_sole_by_phone = any(numero in mittente_str for numero in numeri_sole_365)
+        
+        if is_sole_by_name or is_sole_by_phone:
+            ordini_sole.append(o)
+            
+    # Usa il template PDF Generale passandogli solo i clienti "Sole"
+    pdf_bytes = genera_pdf_ordini_generale(target_date, ordini_sole)
+    filename = f"ordini_sole_365_{target_date}.pdf"
+    salva_e_apri_pdf_temp(pdf_bytes, filename)
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}"}
+    )
+
 @app.get("/api/admin/overview")
 async def get_admin_overview(token: Optional[str] = Query(None), data: Optional[str] = Query(None)):
     if token != ADMIN_TOKEN:
         raise HTTPException(status_code=403, detail="Token riservato non valido.")
     
     target_date = data or await get_data_attiva()
-    ordini_oggi = await get_tutti_ordini(target_date)
-    prod_aggregata = await get_produzione_aggregata(target_date)
+    ordini_oggi = await get_tutti_ordini(target_date)  # type: ignore
+    prod_aggregata = await get_produzione_aggregata(target_date)  # type: ignore
     
     totali_kg = sum(p.get("quantita_totale", 0) for p in prod_aggregata if (p.get("unita_di_misura") or "").lower() == "kg")
     totali_pz = sum(p.get("quantita_totale", 0) for p in prod_aggregata if (p.get("unita_di_misura") or "").lower() in ["pezzi", "pz"])

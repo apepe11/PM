@@ -69,6 +69,7 @@ async def avanza_data_attiva() -> str:
         
     return nuova_str
 
+# --- FIX TEMPORALE: UTILE DELL'ORARIO REALE DEL MESSAGGIO ---
 async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = None) -> Optional[str]:
     if data_consegna is not None:
         if isinstance(data_consegna, datetime):
@@ -93,10 +94,38 @@ async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[s
                 except ValueError:
                     pass
 
+    # Se arriviamo qui, l'IA non ha trovato una data esplicita e non è riuscita a calcolarla.
+    # INVECE di usare get_data_attiva() (che dipende dall'operatore), applichiamo la 
+    # STESSA regola oraria usata dall'IA ma sull'orario REALE del messaggio.
     if data_ricezione:
-        return await get_data_attiva()
+        try:
+            # Presume formato 'YYYY-MM-DD HH:MM:SS'
+            dt_ric = datetime.strptime(data_ricezione, '%Y-%m-%d %H:%M:%S')
+            
+            # Applica le regole:
+            # - Se prima delle 08:00 -> giorno stesso
+            # - Se dopo le 08:00 -> giorno dopo (o lunedì se è sabato)
+            h = dt_ric.hour
+            wd = dt_ric.weekday()
+            
+            if h < 8:
+                dt_calc = dt_ric
+            else:
+                if wd == 5: # Sabato -> Lunedì
+                    dt_calc = dt_ric + timedelta(days=2)
+                else: # Altrimenti -> Giorno dopo
+                    dt_calc = dt_ric + timedelta(days=1)
+                    
+                # Salta la domenica
+                if dt_calc.weekday() == 6:
+                    dt_calc += timedelta(days=1)
+                    
+            return dt_calc.strftime('%Y-%m-%d')
+        except Exception:
+            pass
 
-    return None
+    # Fallback estremo al valore globale (l'utente preme "Chiudi Produzione")
+    return await get_data_attiva()
 
 
 async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_target: Optional[str], finestra_giorni: int = 7):
@@ -123,20 +152,30 @@ async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_targ
 
     return None
 
-
-CATALOGO_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "catalogo_prodotti.json"))
+# --- FIX CATALOGO: Usa la nuova struttura compatta e CARICA I PESI FISSI ---
+CATALOGO_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "catalogo.json"))
 PARTICOLARITA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
 PRODOTTI_MAP = {}
+
 if os.path.exists(CATALOGO_FILE):
     try:
         with open(CATALOGO_FILE, 'r', encoding='utf-8') as f:
             catalog_list = json.load(f)
             for prod in catalog_list:
-                cod = prod.get("codice_prodotto")
-                nome = prod.get("nome_prodotto")
-                um = prod.get("unita_misura", "KG")
+                cod = prod.get("c")
+                nome = prod.get("n")
+                peso = prod.get("p")
+                
+                # Se il prodotto ha un peso fisso ('p'), l'unità di misura base è pezzi, altrimenti kg
+                um = "pezzi" if peso is not None else "kg"
+                
                 if cod:
-                    PRODOTTI_MAP[cod] = {"nome": nome, "unita_misura": um.lower()}
+                    # Salviamo il PESO UNITARIO nella memoria del backend!
+                    PRODOTTI_MAP[cod] = {
+                        "nome": nome, 
+                        "unita_misura": um.lower(),
+                        "peso_unitario": peso # Questo serve per correggere il bug di Filone = 6.0 pezzi
+                    }
     except Exception as e:
         print(f"⚠️ Errore caricamento catalogo in db.py: {e}")
 
@@ -314,6 +353,7 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
 
         mittente_finale = dati_json.get("cliente_id", mittente)
 
+        # Assicuriamoci che normalize_data_consegna usi il now_str corretto (cioè l'orario reale del messaggio)
         corrected_date = await normalize_data_consegna(dati_json.get("data_consegna"), now_str)
         if corrected_date and dati_json.get("data_consegna") != corrected_date:
             dati_json["data_consegna"] = corrected_date
@@ -360,6 +400,7 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             pass   
 
 def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
+    """Questa funzione è il fallback se il prodotto non è nel dizionario PRODOTTI_MAP"""
     if not nome_o_codice:
         return 0.0
     text = nome_o_codice.lower().replace(',', '.')
@@ -443,6 +484,10 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
                 p["numero_lotto"] = lotto_default
                 
             unit_w = estrai_peso_unitario_da_nome(nome)
+            # FIX: Utilizziamo anche il valore memorizzato in PRODOTTI_MAP se l'estrazione da nome fallisce
+            if unit_w <= 0 and cod in PRODOTTI_MAP and PRODOTTI_MAP[cod].get("peso_unitario") is not None:
+                unit_w = float(PRODOTTI_MAP[cod]["peso_unitario"])
+
             if unit_w > 0:
                 p["is_peso_fisso"] = True
                 if not p.get("grammatura") or str(p.get("grammatura")).strip() == "":
@@ -559,6 +604,10 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                     p["nome_articolo"] = PRODOTTI_MAP[cod]["nome"]
 
                 unit_w = estrai_peso_unitario_da_nome(nome)
+                # FIX: Se l'estrazione da stringa nome fallisce, usa il valore estratto dal dizionario JSON
+                if unit_w <= 0 and cod in PRODOTTI_MAP and PRODOTTI_MAP[cod].get("peso_unitario") is not None:
+                    unit_w = float(PRODOTTI_MAP[cod]["peso_unitario"])
+
                 if unit_w > 0:
                     p["is_peso_fisso"] = True
                     p["grammatura"] = f"{unit_w:.3f} KG"

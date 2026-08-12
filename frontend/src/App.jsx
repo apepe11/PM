@@ -10,6 +10,7 @@ import BroadcastManager from './components/BroadcastManager';
 import AnalisiStatistica from './components/AnalisiStatistica';
 import ConnessioneBanco from './components/ConnessioneBanco';
 import OrdiniModal from './components/OrdiniModal';
+import OrdiniSole from './components/OrdiniSole'; // NUOVO IMPORT
 import { Printer, CheckCircle, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -54,7 +55,6 @@ export default function App() {
   const fetchDashboardData = async () => {
     setIsRefreshing(true);
     try {
-      // MODIFICA QUI: Aggiunto ?scomponi_pezzi=true per far esplodere gli articoli a peso variabile
       const resOrdini = await fetch(`${API_BASE}/ordini?scomponi_pezzi=true`);
       if (resOrdini.ok) {
         const dataOrdini = await resOrdini.json();
@@ -254,6 +254,18 @@ export default function App() {
             setSelectedDate={setSelectedDate}
             onEditOrder={handleOpenEditOrderModal}
             onDeleteOrder={handleDeleteOrder}
+          />
+        )}
+
+        {/* NUOVA SEZIONE ORDINI SOLE 365 */}
+        {activeTab === 'sole' && (
+          <OrdiniSole
+            ordini={ordini}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            onEditOrder={handleOpenEditOrderModal}
+            onDeleteOrder={handleDeleteOrder}
+            onConfirmOrder={handleConfirmOrderInline}
           />
         )}
 
