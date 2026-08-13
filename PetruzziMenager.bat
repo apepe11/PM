@@ -104,7 +104,7 @@ REM Avvio Browser Massimizzato
 REM ------------------------------------------------------------
 
 REM Apre Edge o Chrome in finestra massimizzata (a tutto schermo ma con i tasti visibili)
-start msedge --start-maximized "http://localhost:5000" || start chrome --start-maximized "http://localhost:5000"
+start chrome --start-maximized "http://localhost:5000"
 
 REM Chiude automaticamente questo terminale di avvio
 exit
