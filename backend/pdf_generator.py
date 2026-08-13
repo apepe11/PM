@@ -5,6 +5,7 @@ import subprocess
 import logging
 import re
 from datetime import datetime
+from typing import Optional
 from xml.sax.saxutils import escape as _xml_escape
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -14,25 +15,24 @@ from reportlab.lib.units import cm
 
 LOGO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "images", "logo.png"))
 
+def _clean_original_text(text: Optional[str]) -> str:
+    """Ripulisce il testo originale da tag tecnici per renderlo leggibile."""
+    if not text:
+        return ""
+    clean = str(text)
+    clean = re.sub(r'🎙️\s*\[VOCALE TRASCRITTO\]:\s*', '', clean)
+    clean = re.sub(r'\[Parser Locale di Riserva\]\s*', '', clean)
+    clean = re.sub(r'\[Integrazione/Correzione\]:\s*', '\n+ ', clean)
+    return clean.strip()
 
 def _safe_text(value) -> str:
-    """
-    Esegue l'escape XML di qualunque testo LIBERO (proveniente da clienti via WhatsApp/IA:
-    mittente, note_ordine, nome_articolo, grammatura, numero_lotto, ecc.) prima di inserirlo
-    in una stringa che verrà passata a un Paragraph di ReportLab.
-
-    ReportLab interpreta i Paragraph come markup simil-XML (<b>, <br/>, <font>...): se il testo
-    libero contiene simboli come '<', '>' o '&' non escapati (es. "Xké me ho 1 <tag non chiuso"),
-    il parser interno solleva un ValueError e l'intera generazione del PDF si interrompe.
-    Va quindi SEMPRE applicato ai valori dinamici, MAI ai tag strutturali (<b>, <br/>) che
-    scriviamo noi nel codice.
-    """
+    """Esegue l'escape XML di qualunque testo LIBERO."""
     if value is None:
         return ""
     return _xml_escape(str(value))
 
 def apri_file_nativo_os(filepath: str) -> bool:
-    """Apre nativamente 1-Click il file PDF generato con l'applicazione predefinita di sistema (xdg-open / os.startfile / open)."""
+    """Apre nativamente 1-Click il file PDF generato."""
     if not filepath or not os.path.exists(filepath):
         return False
     try:
@@ -68,7 +68,6 @@ def _safe_float(v, default=0.0):
         return default
 
 def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -> bytes:
-    """Genera il PDF per il casaro con il totale della produzione aggregata per il giorno specificato."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -118,7 +117,6 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
 
     data_formatted = formatta_data_it(data_produzione)
 
-    # Intestazione con Logo
     if os.path.exists(LOGO_PATH):
         img = Image(LOGO_PATH, width=2.5*cm, height=2.5*cm)
         img.hAlign = 'LEFT'
@@ -131,7 +129,7 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
         ]
         
         header_table = Table([[img, header_text]], colWidths=[3.0*cm, 15.0*cm])
-        header_table.setStyle(TableStyle([  # type: ignore
+        header_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (0,0), 'LEFT'),
         ]))
@@ -143,7 +141,6 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
     story.append(Spacer(1, 0.5*cm))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#d97706'), spaceBefore=1, spaceAfter=15))
 
-    # Tabella Produzione
     data_table = [
         [
             Paragraph("CODICE", header_cell_style),
@@ -164,7 +161,7 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
         ])
 
     table = Table(data_table, colWidths=[3.5*cm, 8.5*cm, 3.0*cm, 3.0*cm])
-    table.setStyle(TableStyle([  # type: ignore
+    table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4e2a1e')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
@@ -182,7 +179,6 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
     return buffer.getvalue()
 
 def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
-    """Genera il PDF per il singolo ordine cliente con Grammatura Pesata e Lotto."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm
@@ -201,6 +197,9 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
     )
     cell_norm = ParagraphStyle(
         'CellNorm', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=12, textColor=colors.HexColor('#1c1917')
+    )
+    msg_style = ParagraphStyle(
+        'MsgStyle', parent=styles['Normal'], fontName='Helvetica-Oblique', fontSize=9, leading=11, textColor=colors.HexColor('#4b5563')
     )
 
     data_cons_formatted = formatta_data_it(ordine.get('data_consegna',''))
@@ -233,19 +232,20 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
         ]
     ]
 
-    lotto_gen = ordine.get('numero_lotto') or f"L{datetime.now().strftime('%y%m%d')}"
-
     for p in ordine.get('prodotti', []):
+        grammatura_str = p.get('grammatura') or ""
+        lotto_str = p.get('numero_lotto') or ordine.get('numero_lotto') or ""
+
         data_tab.append([
             Paragraph(str(p.get("codice_articolo", "")), cell_norm),
             Paragraph(_safe_text(p.get("nome_articolo", "") or p.get("codice_articolo", "")), cell_norm),
             Paragraph(f"{p.get('quantita', 1.0)} {_safe_text(p.get('unita_di_misura', 'kg'))}", cell_norm),
-            Paragraph(f"<b>{_safe_text(p.get('grammatura', '-'))}</b>", cell_bold),
-            Paragraph(f"<b>{_safe_text(p.get('numero_lotto') or lotto_gen)}</b>", cell_bold)
+            Paragraph(f"<b>{_safe_text(grammatura_str)}</b>", cell_bold),
+            Paragraph(f"<b>{_safe_text(lotto_str)}</b>", cell_bold)
         ])
 
     table = Table(data_tab, colWidths=[3.0*cm, 7.0*cm, 2.5*cm, 3.0*cm, 2.5*cm])
-    table.setStyle(TableStyle([  # type: ignore
+    table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#fef3c7')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
         ('TOPPADDING', (0,0), (-1,-1), 6),
@@ -253,15 +253,22 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
     ]))
     story.append(table)
 
+    story.append(Spacer(1, 0.4*cm))
+
     if ordine.get("note_ordine"):
-        story.append(Spacer(1, 0.4*cm))
-        story.append(Paragraph(f"<b>Note Ordine:</b> {_safe_text(ordine.get('note_ordine'))}", sub_style))
+        story.append(Paragraph(f"<b>Note Ordine/Resi:</b> {_safe_text(ordine.get('note_ordine'))}", sub_style))
+        story.append(Spacer(1, 0.2*cm))
+
+    # FIX TIPO PYLANCE
+    testo_orig = ordine.get("testo_originale") or ""
+    if testo_orig and "Inserimento Manuale" not in testo_orig:
+        clean_msg = _clean_original_text(testo_orig)
+        story.append(Paragraph(f"<b>Messaggio WhatsApp Originale:</b><br/>\"{_safe_text(clean_msg)}\"", msg_style))
 
     doc.build(story)
     return buffer.getvalue()
 
 def genera_pdf_filoni(data_str: str, clienti_filoni: list) -> bytes:
-    """Genera la scheda PDF raggruppata per la lavorazione dei Filoni Pizzeria."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm
@@ -316,7 +323,7 @@ def genera_pdf_filoni(data_str: str, clienti_filoni: list) -> bytes:
         ])
 
     table = Table(data_tab, colWidths=[5.0*cm, 8.0*cm, 5.0*cm])
-    table.setStyle(TableStyle([  # type: ignore
+    table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#fef3c7')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -329,7 +336,6 @@ def genera_pdf_filoni(data_str: str, clienti_filoni: list) -> bytes:
     return buffer.getvalue()
 
 def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: list) -> bytes:
-    """Genera la scheda riepilogativa PDF A4 per gli ordini già confezionati per il banco vendita."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm
@@ -362,7 +368,7 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
             Paragraph(f"Generato il: {datetime.now().strftime('%d/%m/%Y alle %H:%M')}", styles['Italic'])
         ]
         header_table = Table([[img, header_text]], colWidths=[3.2*cm, 14.8*cm])
-        header_table.setStyle(TableStyle([  # type: ignore
+        header_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (0,0), 'LEFT'),
         ]))
@@ -383,7 +389,7 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
 
     for idx, o in enumerate(ordini_confezionati, 1):
         prods_str = "<br/>".join([
-            f"• {_safe_text(p.get('nome_articolo') or p.get('codice_articolo'))}: {p.get('quantita')} {_safe_text(p.get('unita_di_misura'))} ({_safe_text(p.get('grammatura','-'))})"
+            f"• {_safe_text(p.get('nome_articolo') or p.get('codice_articolo'))}: {p.get('quantita')} {_safe_text(p.get('unita_di_misura'))} ({_safe_text(p.get('grammatura') or 'Da pesare')})"
             for p in o.get('prodotti', [])
         ])
         peso_raw = o.get('peso_reale')
@@ -400,7 +406,7 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
         ])
 
     table = Table(data_tab, colWidths=[1.0*cm, 4.5*cm, 7.5*cm, 2.5*cm, 2.5*cm])
-    table.setStyle(TableStyle([  # type: ignore
+    table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#d1fae5')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#a7f3d0')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -413,7 +419,6 @@ def genera_pdf_ordini_confezionati_banco(data_str: str, ordini_confezionati: lis
     return buffer.getvalue()
 
 def genera_pdf_ordini_generale(data_str: str, ordini: list) -> bytes:
-    """Genera il PDF riepilogativo con la lista di tutti gli ordini per la preparazione."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm
@@ -432,6 +437,9 @@ def genera_pdf_ordini_generale(data_str: str, ordini: list) -> bytes:
     )
     cell_norm = ParagraphStyle(
         'CellNorm', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=12, textColor=colors.HexColor('#1c1917')
+    )
+    msg_style = ParagraphStyle(
+        'MsgStyle', parent=styles['Normal'], fontName='Helvetica-Oblique', fontSize=8, leading=10, textColor=colors.HexColor('#6b7280')
     )
 
     data_formatted = formatta_data_it(data_str) if data_str else "Tutti gli ordini"
@@ -457,21 +465,28 @@ def genera_pdf_ordini_generale(data_str: str, ordini: list) -> bytes:
     data_tab = [
         [
             Paragraph("<b>CLIENTE</b>", cell_bold),
-            Paragraph("<b>ARTICOLI ORDINATI</b>", cell_bold),
-            Paragraph("<b>NOTE / DETTAGLI</b>", cell_bold)
+            Paragraph("<b>ARTICOLI ORDINATI E MESSAGGIO ORIGINALE</b>", cell_bold),
+            Paragraph("<b>NOTE / RESI</b>", cell_bold)
         ]
     ]
 
     for o in ordini:
         prods_str = "<br/>".join([f"• {_safe_text(p.get('nome_articolo') or p.get('codice_articolo'))}: <b>{p.get('quantita')} {_safe_text(p.get('unita_di_misura'))}</b>" for p in o.get('prodotti', [])])
+        
+        # FIX TIPO PYLANCE
+        testo_orig = o.get("testo_originale") or ""
+        if testo_orig and "Inserimento Manuale" not in testo_orig:
+            clean_msg = _clean_original_text(testo_orig)
+            prods_str += f"<br/><br/><font color='#2563eb'><i>\"{_safe_text(clean_msg)}\"</i></font>"
+
         data_tab.append([
             Paragraph(f"<b>{_safe_text(o.get('mittente',''))}</b>", cell_bold),
             Paragraph(prods_str, cell_norm),
             Paragraph(_safe_text(o.get("note_ordine")) or "-", cell_norm)
         ])
 
-    table = Table(data_tab, colWidths=[5.0*cm, 8.0*cm, 5.0*cm])
-    table.setStyle(TableStyle([  # type: ignore
+    table = Table(data_tab, colWidths=[4.5*cm, 9.0*cm, 4.5*cm])
+    table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#fef3c7')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
