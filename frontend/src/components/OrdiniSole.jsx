@@ -122,6 +122,22 @@ const SoleOrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, delete
                       </div>
                     </div>
 
+                    {/* Nuovo campo: Peso Reale / Grammatura (Vuoto di default) */}
+                    <div className="flex flex-col items-start">
+                      <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Peso Reale</label>
+                      {ord.stato_ordine !== 'CONFERMATO' ? (
+                        <input
+                          type="text"
+                          placeholder="es. 1.25 KG"
+                          value={primo.grammatura || ''}
+                          onChange={(e) => handleGroupChange(indici, 'grammatura', e.target.value)}
+                          className="w-24 h-[26px] px-2 text-[10px] font-mono font-semibold bg-white border border-petruzzi-300 rounded-md focus:ring-1 focus:ring-petruzzi-700 outline-none shadow-sm placeholder-petruzzi-400"
+                        />
+                      ) : (
+                        <span className="flex items-center h-[26px] text-[10px] font-mono font-bold text-petruzzi-700 bg-petruzzi-100 px-2 rounded-md border border-petruzzi-200">{primo.grammatura || '-'}</span>
+                      )}
+                    </div>
+
                     <div className="flex flex-col items-start">
                       <label className="text-[9px] font-black text-petruzzi-600 uppercase mb-0.5 ml-0.5">Lotto Art.</label>
                       {ord.stato_ordine !== 'CONFERMATO' ? (

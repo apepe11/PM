@@ -32,9 +32,6 @@ export default function FiloniPizzeria({ selectedDate, setSelectedDate, onEditOr
     c.prodotti_filoni.some(p => (p.nome_articolo || p.codice_articolo).toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const totalKgFiloni = clientiFiloni.reduce((acc, curr) => acc + (curr.totale_kg || 0), 0);
-  const totalPzFiloni = clientiFiloni.reduce((acc, curr) => acc + (curr.totale_pz || 0), 0);
-
   return (
     <div className="space-y-6 animate-fadeIn">
       
@@ -116,9 +113,9 @@ export default function FiloniPizzeria({ selectedDate, setSelectedDate, onEditOr
             <div key={idx} className="petruzzi-card p-6 rounded-2xl border border-petruzzi-200 space-y-4">
               
               {/* Client Header */}
-              <div className="flex items-center justify-between border-b border-petruzzi-200 pb-3">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-petruzzi-200 pb-3 gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-xl bg-petruzzi-100 border border-petruzzi-300 flex items-center justify-center text-petruzzi-800 font-extrabold text-lg">
+                  <div className="w-10 h-10 rounded-xl bg-petruzzi-100 border border-petruzzi-300 flex items-center justify-center text-petruzzi-800 font-extrabold text-lg shrink-0">
                     🍕
                   </div>
                   <div>
@@ -127,15 +124,27 @@ export default function FiloniPizzeria({ selectedDate, setSelectedDate, onEditOr
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-3">
-                  <div className="text-right">
-                    <span className="text-xs text-petruzzi-700 uppercase font-bold block">Totale Filoni Cliente</span>
-                    <span className="text-xl font-black text-petruzzi-800">
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* Somma Teorica */}
+                  <div className="text-right bg-petruzzi-50 px-3 py-1.5 rounded-xl border border-petruzzi-200">
+                    <span className="text-[10px] text-petruzzi-600 uppercase font-bold block">Somma Teorica Filoni</span>
+                    <span className="text-base font-black text-petruzzi-800">
                       {cli.totale_kg > 0 ? `${cli.totale_kg} KG` : `${cli.totale_pz} PZ`}
                     </span>
                   </div>
 
-                  <div className="flex items-center space-x-1.5 border-l border-petruzzi-200 pl-3">
+                  {/* Campi input visivi per la schermata (Vuoti di default come da richiesta) */}
+                  <div className="text-left">
+                    <span className="text-[10px] text-petruzzi-700 uppercase font-bold block mb-1">Peso Reale (Somma)</span>
+                    <input type="text" placeholder="es. 10.5 KG" className="w-24 bg-white border border-petruzzi-300 rounded-lg px-2 py-1.5 text-xs font-bold outline-none focus:border-petruzzi-700" />
+                  </div>
+
+                  <div className="text-left">
+                    <span className="text-[10px] text-petruzzi-700 uppercase font-bold block mb-1">Lotto Unico</span>
+                    <input type="text" placeholder="N° Lotto" className="w-20 bg-white border border-petruzzi-300 rounded-lg px-2 py-1.5 text-xs font-bold font-mono outline-none focus:border-petruzzi-700" />
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 border-l border-petruzzi-200 pl-4">
                     {onEditOrder && (
                       <button
                         onClick={() => onEditOrder({

@@ -20,13 +20,13 @@ export default function PostazioneTablet() {
         setOrdini(data);
         
         const initialForm = {};
-        const todayLotto = `L${new Date().toISOString().slice(2,10).replace(/-/g, '')}`;
         data.forEach(o => {
           // Prepara lo stato per ogni SINGOLO pezzo del prodotto
           initialForm[o.id] = o.prodotti.map(p => ({
             ...p,
-            numero_lotto: p.numero_lotto || todayLotto,
-            // Se è a peso fisso, pre-imposta la grammatura e non permette di cambiarla
+            // Lascia il lotto completamente vuoto di default per forzare l'inserimento manuale
+            numero_lotto: p.numero_lotto || '',
+            // Se è a peso fisso pre-imposta la grammatura fissa, altrimenti vuoto
             grammatura: p.grammatura || (p.is_peso_fisso ? `${p.peso_unitario_kg} KG` : '')
           }));
         });
@@ -243,10 +243,11 @@ export default function PostazioneTablet() {
                       <div className="col-span-3">
                         <input
                           type="text"
+                          placeholder="es. L240813"
                           value={p.numero_lotto}
                           onChange={(e) => handleProductChange(ord.id, pIdx, 'numero_lotto', e.target.value.toUpperCase())}
                           disabled={isConfezionato}
-                          className="w-full bg-white border border-petruzzi-300 text-petruzzi-900 font-bold text-sm font-mono rounded-lg px-3 py-2 outline-none focus:border-petruzzi-700 disabled:opacity-60"
+                          className="w-full bg-white border border-petruzzi-300 text-petruzzi-900 font-bold text-sm font-mono rounded-lg px-3 py-2 outline-none focus:border-petruzzi-700 disabled:opacity-60 placeholder:text-gray-400"
                         />
                       </div>
                     </div>

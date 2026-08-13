@@ -94,8 +94,8 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
         updated[index].unita_di_misura = hasWeight ? 'pezzi' : 'kg';
       }
     } else if (field === 'quantita') {
-      // Permette solo numeri, punti e virgole (rimuove lettere o altri simboli)
-      updated[index].quantita = value.replace(/[^0-9.,]/g, ''); 
+      // Permette numeri, punti, virgole e il segno meno per i valori negativi
+      updated[index].quantita = value.replace(/[^0-9.,-]/g, ''); 
     } else {
       updated[index][field] = value;
     }
