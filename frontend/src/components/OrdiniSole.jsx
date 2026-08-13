@@ -145,13 +145,14 @@ const SoleOrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, delete
           )}
         </div>
 
-        {ord.testo_originale && (ord.testo_originale.includes('VOCALE') || ord.testo_originale.includes('🎙️')) && (
-          <div className="bg-amber-100/90 p-3 rounded-xl border border-amber-300 flex items-start space-x-2 text-xs text-amber-950">
-            <Mic className="w-4 h-4 text-amber-800 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-black text-amber-900 block text-[11px]">Vocale Trascritto da Gemini:</span>
-              <span className="italic">{ord.testo_originale.replace(/🎙️\s*\[VOCALE TRASCRITTO\]:\s*/, '')}</span>
+        {/* BOX MESSAGGIO ORIGINALE */}
+        {ord.testo_originale && !ord.testo_originale.includes('Inserimento Manuale') && (
+          <div className="bg-blue-50/70 p-2.5 rounded-xl border border-blue-200 text-xs text-blue-900 mt-2">
+            <div className="flex items-center space-x-1.5 font-bold text-blue-800 uppercase tracking-wider mb-1 text-[10px]">
+              <MessageSquare className="w-3 h-3" />
+              <span>Msg. WhatsApp Originale:</span>
             </div>
+            <p className="italic font-medium">"{ord.testo_originale.replace(/🎙️\s*\[VOCALE TRASCRITTO\]:\s*/g, '').replace(/\[Parser Locale di Riserva\]\s*/g, '').replace(/\[Integrazione\/Correzione\]:\s*/g, ' + ')}"</p>
           </div>
         )}
 

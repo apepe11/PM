@@ -34,10 +34,6 @@ export default function TabletApp() {
         <PostazioneTablet />
       </main>
 
-      {/* Footer */}
-      <footer className="bg-petruzzi-100/90 border-t border-petruzzi-200 py-3 text-center text-[11px] text-petruzzi-700 font-semibold">
-        Caseificio Petruzzi • Interfaccia Tablet Touch Riservata Confezionamento
-      </footer>
     </div>
   );
 }

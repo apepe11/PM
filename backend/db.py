@@ -94,29 +94,20 @@ async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[s
                 except ValueError:
                     pass
 
-    # Se arriviamo qui, l'IA non ha trovato una data esplicita e non è riuscita a calcolarla.
-    # INVECE di usare get_data_attiva() (che dipende dall'operatore), applichiamo la 
-    # STESSA regola oraria usata dall'IA ma sull'orario REALE del messaggio.
     if data_ricezione:
         try:
-            # Presume formato 'YYYY-MM-DD HH:MM:SS'
             dt_ric = datetime.strptime(data_ricezione, '%Y-%m-%d %H:%M:%S')
-            
-            # Applica le regole:
-            # - Se prima delle 08:00 -> giorno stesso
-            # - Se dopo le 08:00 -> giorno dopo (o lunedì se è sabato)
             h = dt_ric.hour
             wd = dt_ric.weekday()
             
             if h < 8:
                 dt_calc = dt_ric
             else:
-                if wd == 5: # Sabato -> Lunedì
+                if wd == 5: 
                     dt_calc = dt_ric + timedelta(days=2)
-                else: # Altrimenti -> Giorno dopo
+                else: 
                     dt_calc = dt_ric + timedelta(days=1)
                     
-                # Salta la domenica
                 if dt_calc.weekday() == 6:
                     dt_calc += timedelta(days=1)
                     
@@ -124,7 +115,6 @@ async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[s
         except Exception:
             pass
 
-    # Fallback estremo al valore globale (l'utente preme "Chiudi Produzione")
     return await get_data_attiva()
 
 
@@ -166,18 +156,17 @@ if os.path.exists(CATALOGO_FILE):
                 nome = prod.get("n")
                 peso = prod.get("p")
                 
-                # Se il prodotto ha un peso fisso ('p'), l'unità di misura base è pezzi, altrimenti kg
                 um = "pezzi" if peso is not None else "kg"
                 
                 if cod:
-                    # Salviamo il PESO UNITARIO nella memoria del backend!
                     PRODOTTI_MAP[cod] = {
                         "nome": nome, 
                         "unita_misura": um.lower(),
-                        "peso_unitario": peso # Questo serve per correggere il bug di Filone = 6.0 pezzi
+                        "peso_unitario": peso 
                     }
     except Exception as e:
         print(f"⚠️ Errore caricamento catalogo in db.py: {e}")
+
 
 async def init_db():
     async with get_db_connection() as db:
@@ -200,6 +189,15 @@ async def init_db():
                 data_ricezione DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # 🔥 NUOVA TABELLA: MEMORIA A LUNGO TERMINE MESSAGGI WHATSAPP 🔥
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS messaggi_elaborati (
+                msg_id TEXT PRIMARY KEY,
+                data_elaborazione DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         await db.execute("""
             CREATE TABLE IF NOT EXISTS broadcast_liste (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,6 +245,27 @@ async def init_db():
         await get_data_attiva()
         print("🗄️ Database Locale SQLite pronto con modalità Anti-Blocco (WAL) attiva.")
 
+# -------------------------------------------------------------
+# 🔥 NUOVE FUNZIONI: CONTROLLO ID MESSAGGIO NEL DATABASE 🔥
+# -------------------------------------------------------------
+async def is_messaggio_elaborato(msg_id: str) -> bool:
+    """Verifica nel DB se questo ID messaggio è già stato processato."""
+    if not msg_id:
+        return False
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT 1 FROM messaggi_elaborati WHERE msg_id = ?", (msg_id,))
+        row = await cursor.fetchone()
+        return bool(row)
+
+async def segna_messaggio_elaborato(msg_id: str):
+    """Salva l'ID del messaggio nel DB per evitare rielaborazioni future."""
+    if not msg_id:
+        return
+    async with get_db_connection() as db:
+        await db.execute("INSERT OR IGNORE INTO messaggi_elaborati (msg_id) VALUES (?)", (msg_id,))
+        await db.commit()
+# -------------------------------------------------------------
+
 async def get_storico_oggi(mittente: str) -> str:
     target_data_consegna = await get_data_attiva()
     async with get_db_connection() as db:
@@ -278,7 +297,6 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
 
         mittente_finale = dati_json.get("cliente_id", mittente)
 
-        # Assicuriamoci che normalize_data_consegna usi il now_str corretto (cioè l'orario reale del messaggio)
         corrected_date = await normalize_data_consegna(dati_json.get("data_consegna"), now_str)
         if corrected_date and dati_json.get("data_consegna") != corrected_date:
             dati_json["data_consegna"] = corrected_date
@@ -319,7 +337,6 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
         await db.commit()
 
 def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
-    """Questa funzione è il fallback se il prodotto non è nel dizionario PRODOTTI_MAP"""
     if not nome_o_codice:
         return 0.0
     text = nome_o_codice.lower().replace(',', '.')
@@ -403,7 +420,6 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
                 p["numero_lotto"] = lotto_default
                 
             unit_w = estrai_peso_unitario_da_nome(nome)
-            # FIX: Utilizziamo anche il valore memorizzato in PRODOTTI_MAP se l'estrazione da nome fallisce
             if unit_w <= 0 and cod in PRODOTTI_MAP and PRODOTTI_MAP[cod].get("peso_unitario") is not None:
                 unit_w = float(PRODOTTI_MAP[cod]["peso_unitario"])
 
@@ -523,7 +539,6 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                     p["nome_articolo"] = PRODOTTI_MAP[cod]["nome"]
 
                 unit_w = estrai_peso_unitario_da_nome(nome)
-                # FIX: Se l'estrazione da stringa nome fallisce, usa il valore estratto dal dizionario JSON
                 if unit_w <= 0 and cod in PRODOTTI_MAP and PRODOTTI_MAP[cod].get("peso_unitario") is not None:
                     unit_w = float(PRODOTTI_MAP[cod]["peso_unitario"])
 
@@ -582,9 +597,7 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
             (mittente, testo_orig, json.dumps(dati_ia, ensure_ascii=False), now_str)
         )
         await db.commit()
-        last_id = cursor.lastrowid
-
-        return last_id
+        return cursor.lastrowid
 
 async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
     async with get_db_connection() as db:
@@ -618,8 +631,9 @@ async def elimina_ordine(id_ordine: int):
 async def svuota_database_ordini():
     async with get_db_connection() as db:
         await db.execute("DELETE FROM ordini")
+        await db.execute("DELETE FROM messaggi_elaborati")
         await db.commit()
-        print("🧹 Database ordini svuotato con successo.")
+        print("🧹 Database ordini e memoria messaggi svuotati con successo.")
         return True
 
 async def rielabora_tutti_ordini():

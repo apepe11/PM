@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, FileText, Calendar, Hash, Scale, Clock, Search, ExternalLink, PackageCheck } from 'lucide-react';
+import { CheckCircle2, FileText, Calendar, Hash, Scale, Clock, Search, ExternalLink, PackageCheck, MessageSquare } from 'lucide-react';
 import { formatDateIT } from '../utils/dateUtils';
 
 export default function OrdiniConfermati({ ordini, selectedDate, setSelectedDate }) {
@@ -144,9 +144,20 @@ export default function OrdiniConfermati({ ordini, selectedDate, setSelectedDate
                 </div>
               </div>
 
+              {/* BOX MESSAGGIO ORIGINALE */}
+              {ord.testo_originale && !ord.testo_originale.includes('Inserimento Manuale') && (
+                <div className="bg-blue-50/70 p-2.5 rounded-xl border border-blue-200 text-xs text-blue-900 mt-2">
+                  <div className="flex items-center space-x-1.5 font-bold text-blue-800 uppercase tracking-wider mb-1 text-[10px]">
+                    <MessageSquare className="w-3 h-3" />
+                    <span>Msg. WhatsApp Originale:</span>
+                  </div>
+                  <p className="italic font-medium">"{ord.testo_originale.replace(/🎙️\s*\[VOCALE TRASCRITTO\]:\s*/, '').replace(/\[Parser Locale di Riserva\]\s*/, '')}"</p>
+                </div>
+              )}
+
               {ord.note_ordine && (
-                <div className="bg-petruzzi-100/70 p-2.5 rounded-xl border border-petruzzi-200 text-xs text-petruzzi-900">
-                  <span className="font-bold text-petruzzi-700 uppercase tracking-wider block text-[10px]">Note:</span>
+                <div className="bg-petruzzi-100/70 p-2.5 rounded-xl border border-petruzzi-200 text-xs text-petruzzi-900 mt-2">
+                  <span className="font-bold text-petruzzi-700 uppercase tracking-wider block text-[10px]">Note Resi:</span>
                   <p className="italic">{ord.note_ordine}</p>
                 </div>
               )}

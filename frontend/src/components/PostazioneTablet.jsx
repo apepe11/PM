@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tablet, Scale, Hash, CheckCircle2, PackageCheck, Clock, RefreshCw, AlertCircle, Unlock, Lock, Layers } from 'lucide-react';
+import { Tablet, Scale, Hash, CheckCircle2, PackageCheck, Clock, RefreshCw, AlertCircle, Unlock, Lock, Layers, MessageSquare } from 'lucide-react';
 import { formatDateIT } from '../utils/dateUtils';
 
 export default function PostazioneTablet() {
@@ -252,6 +252,28 @@ export default function PostazioneTablet() {
                     </div>
                   ))}
                 </div>
+
+                {/* BOX MESSAGGIO ORIGINALE */}
+                {ord.testo_originale && !ord.testo_originale.includes('Inserimento Manuale') && (
+                  <div className="bg-blue-50/70 p-3 rounded-xl border border-blue-200 text-xs text-blue-900">
+                    <div className="flex items-center space-x-1.5 font-bold text-blue-800 uppercase tracking-wider mb-1 text-[10px]">
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Msg. WhatsApp Originale:</span>
+                    </div>
+                    <p className="italic font-medium">"{ord.testo_originale.replace(/🎙️\s*\[VOCALE TRASCRITTO\]:\s*/g, '').replace(/\[Parser Locale di Riserva\]\s*/g, '').replace(/\[Integrazione\/Correzione\]:\s*/g, ' + ')}"</p>
+                  </div>
+                )}
+
+                {/* BOX NOTE */}
+                {ord.note_ordine && (
+                  <div className="bg-amber-50/90 p-3 rounded-xl border border-amber-300 text-xs text-amber-950">
+                    <div className="flex items-center space-x-1.5 font-black text-amber-900 mb-0.5 text-[11px]">
+                      <MessageSquare className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Note Consegna / Resi:</span>
+                    </div>
+                    <p className="italic font-medium">{ord.note_ordine}</p>
+                  </div>
+                )}
 
                 {!isConfezionato ? (
                   <button

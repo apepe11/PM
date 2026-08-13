@@ -9,7 +9,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const [note, setNote] = useState('');
   const [clientiRegistrati, setClientiRegistrati] = useState([]);
   const [prodotti, setProdotti] = useState([
-    { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: 1, unita_di_misura: 'kg' }
+    { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg' }
   ]);
 
   useEffect(() => {
@@ -50,7 +50,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
         setProdotti(editingOrder.prodotti.map(p => ({
           codice_articolo: p.codice_articolo || '',
           nome_articolo: p.nome_articolo || p.codice_articolo || '',
-          quantita: p.quantita || 1,
+          quantita: p.quantita !== undefined ? p.quantita.toString() : "1", // Salviamo come stringa provvisoria
           unita_di_misura: p.unita_di_misura || 'kg'
         })));
       }
@@ -63,7 +63,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
       setDataConsegna(new Date().toISOString().split('T')[0]);
       setNote('');
       setProdotti([
-        { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: 1, unita_di_misura: 'kg' }
+        { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg' }
       ]);
     }
   }, [editingOrder, isOpen, clientiRegistrati]);
@@ -73,7 +73,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const handleAddProductRow = () => {
     setProdotti([
       ...prodotti,
-      { codice_articolo: 'TRSCAPE', nome_articolo: 'Treccia di Scamorza Petruzzi', quantita: 1, unita_di_misura: 'pezzi' }
+      { codice_articolo: 'TRSCAPE', nome_articolo: 'Treccia di Scamorza Petruzzi', quantita: "1", unita_di_misura: 'pezzi' }
     ]);
   };
 
@@ -85,18 +85,17 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const handleProductChange = (index, field, value) => {
     const updated = [...prodotti];
     if (field === 'codice_articolo') {
-      // FIX DOPPIA LETTURA: Supporta sia il catalogo con chiavi lunghe (codice_prodotto) sia chiavi corte (c)
       const found = prodottiCatalogo.find(p => (p.c || p.codice_prodotto) === value);
       updated[index].codice_articolo = value;
       
       if (found) {
         updated[index].nome_articolo = found.n || found.nome_prodotto || value;
-        // Se c'è un peso (chiave 'p' o non nullo), usa i pezzi di default
         const hasWeight = found.p !== undefined ? found.p !== null : found.peso_unitario !== null;
         updated[index].unita_di_misura = hasWeight ? 'pezzi' : 'kg';
       }
     } else if (field === 'quantita') {
-      updated[index].quantita = parseFloat(value) || 0;
+      // Permette solo numeri, punti e virgole (rimuove lettere o altri simboli)
+      updated[index].quantita = value.replace(/[^0-9.,]/g, ''); 
     } else {
       updated[index][field] = value;
     }
@@ -108,12 +107,18 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
     const finalMittente = isNuovoCliente ? mittenteInput.trim() : mittenteSelect.trim();
     if (!finalMittente) return;
 
+    // Convertiamo le stringhe in numeri float (sostituendo eventuali virgole con punti) prima di salvare
+    const finalProdotti = prodotti.map(p => ({
+        ...p,
+        quantita: parseFloat(p.quantita.toString().replace(',', '.')) || 0
+    }));
+
     onSave({
       id: editingOrder?.id,
       mittente: finalMittente,
       data_consegna: dataConsegna,
       note_ordine: note,
-      prodotti
+      prodotti: finalProdotti
     });
     onClose();
   };
@@ -231,8 +236,6 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
 
             <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
               {prodotti.map((p, idx) => {
-                // Genera la lista delle opzioni dal catalogo disponibile
-                // Usando un fallback se il prodotto nel database non esiste più nel file JSON.
                 const existsInCatalog = prodottiCatalogo.some(cat => (cat.c || cat.codice_prodotto) === p.codice_articolo);
                 
                 return (
@@ -244,7 +247,6 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
                       onChange={(e) => handleProductChange(idx, 'codice_articolo', e.target.value)}
                       className="flex-1 bg-white border border-petruzzi-300 text-petruzzi-950 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-petruzzi-700 shadow-sm"
                     >
-                      {/* Se l'articolo è "orfano" o rimosso, mostralo comunque come opzione per non rompere la UI */}
                       {!existsInCatalog && p.codice_articolo && (
                         <option value={p.codice_articolo}>{p.nome_articolo || p.codice_articolo} (Non in catalogo)</option>
                       )}
@@ -260,11 +262,10 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
                       })}
                     </select>
 
-                    {/* Quantity Input */}
+                    {/* Quantity Input - ORA E' UN CAMPO DI TESTO PER GESTIRE VIRGOLE E DECIMALI IN MODO LIBERO */}
                     <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
+                      type="text"
+                      inputMode="decimal"
                       value={p.quantita}
                       onChange={(e) => handleProductChange(idx, 'quantita', e.target.value)}
                       className="w-20 bg-white border border-petruzzi-300 text-petruzzi-950 font-black text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"

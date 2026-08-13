@@ -212,7 +212,11 @@ class AIParser:
         CATALOGO: {catalog_formatted}
         {regole_cliente}
 
-        MAPPATURA/RESI: Usa ESATTAMENTE Codice/Nome. Pezzi->pezzi, g/Kg sfusi->kg. Se chiede reso/cambio, calcola SOLO il saldo netto da consegnare in "prodotti". Note reso in "note_ordine".
+        MAPPATURA QUANTITÀ E RESI:
+        - Usa ESATTAMENTE Codice/Nome. 
+        - Se la quantità è preceduta da "N", "n.", "n" (es. "N3 scamorze", "n 4 filoni"), significa SEMPRE e SOLO "pezzi", MAI "kg".
+        - Pezzi->pezzi, g/Kg sfusi->kg. 
+        - Se chiede reso/cambio, calcola SOLO il saldo netto da consegnare in "prodotti". Note reso in "note_ordine".
 
         SCHEMA JSON DA RISPETTARE:
         {{

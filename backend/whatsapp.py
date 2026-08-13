@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
 
-from backend.db import get_storico_oggi, salva_o_aggiorna_ordine, ordine_esiste_in_db
+from backend.db import get_storico_oggi, salva_o_aggiorna_ordine, ordine_esiste_in_db, is_messaggio_elaborato, segna_messaggio_elaborato
 from backend.ai_parser import AIParser
 
 # ---------------------------------------------------------
@@ -26,15 +26,10 @@ _sync_loop_task: Optional[asyncio.Task] = None
 DB_WRITE_LOCK = asyncio.Lock()
 
 ai_parser = AIParser(base_dir="catalogo")
-messaggi_processati = set()
 
 # ---------------------------------------------------------
 # 📦 DEBOUNCING MESSAGGI "A RATE"
 # ---------------------------------------------------------
-# Se un cliente scrive più messaggi in rapida successione (es. un
-# prodotto per messaggio), li raggruppiamo in un unico buffer per
-# cliente e li inviamo all'IA come un unico testo solo quando il
-# cliente smette di scrivere per DEBOUNCE_SECONDS secondi.
 DEBOUNCE_SECONDS = float(os.environ.get("WHATSAPP_DEBOUNCE_SECONDS", "12"))
 message_buffers: dict = {}  # mittente -> {"testi": [...], "msg_raw": ..., "data_ricezione_custom": ..., "timer_task": Task}
 
@@ -51,7 +46,7 @@ WHATSAPP_STATE = {
 # Memoria Ram per la Rubrica Telefonica
 WHATSAPP_CONTACTS = {}
 
-def add_whatsapp_log(messaggio: str, tipo: str = "INFO", metadata: Optional[dict] = None):
+def add_whatsapp_log(messaggio: str, tipo: str = "INFO", metadata: Optional[dict] = None) -> None:
     entry = {
         "timestamp": datetime.now().strftime('%H:%M:%S'),
         "testo": messaggio,
@@ -63,16 +58,16 @@ def add_whatsapp_log(messaggio: str, tipo: str = "INFO", metadata: Optional[dict
         WHATSAPP_STATE["eventi_log"].pop()
     print(f"[{tipo}] {messaggio}")
 
-def get_whatsapp_status():
+def get_whatsapp_status() -> dict:
     return WHATSAPP_STATE
 
-def _req_headers():
+def _req_headers() -> dict:
     return {
         "apikey": EVOLUTION_API_KEY,
         "Content-Type": "application/json"
     }
 
-async def _configura_webhook_evolution():
+async def _configura_webhook_evolution() -> bool:
     payload = {
         "webhook": {
             "enabled": True,
@@ -94,7 +89,7 @@ async def _configura_webhook_evolution():
         add_whatsapp_log(f"⚠️ Impossibile configurare il webhook: {e}", "WARN")
         return False
 
-async def _sincronizza_rubrica_evolution():
+async def _sincronizza_rubrica_evolution() -> None:
     try:
         res = requests.post(f"{EVOLUTION_URL}/chat/findContacts/{INSTANCE_NAME}", json={}, headers=_req_headers(), timeout=20)
         if res.status_code == 200:
@@ -115,7 +110,7 @@ async def _sincronizza_rubrica_evolution():
     except Exception as e:
         add_whatsapp_log(f"⚠️ Errore sincronizzazione rubrica: {e}", "WARN")
 
-async def _loop_sincronizzazione_periodica():
+async def _loop_sincronizzazione_periodica() -> None:
     while True:
         try:
             if WHATSAPP_STATE.get("stato_connessione") == "CONNESSO":
@@ -124,12 +119,12 @@ async def _loop_sincronizzazione_periodica():
             add_whatsapp_log(f"⚠️ Errore nel loop periodico: {e}", "WARN")
         await asyncio.sleep(SYNC_INTERVAL_SECONDS)
 
-def avvia_loop_sincronizzazione_periodica():
+def avvia_loop_sincronizzazione_periodica() -> None:
     global _sync_loop_task
     if _sync_loop_task is None or _sync_loop_task.done():
         _sync_loop_task = asyncio.create_task(_loop_sincronizzazione_periodica())
 
-async def avvia_whatsapp():
+async def avvia_whatsapp() -> None:
     add_whatsapp_log("🚀 Connessione al motore Evolution API in corso...", "INFO")
     
     try:
@@ -183,7 +178,7 @@ async def avvia_whatsapp():
     except Exception as e:
         add_whatsapp_log(f"❌ Impossibile contattare Evolution API: {e}", "ERROR")
 
-async def reset_whatsapp_banco():
+async def reset_whatsapp_banco() -> bool:
     add_whatsapp_log("🗑️ Resetto dispositivo Banco corrente...", "WARN")
     WHATSAPP_STATE["stato_connessione"] = "DISCONNESSO"
     WHATSAPP_STATE["qr_code_base64"] = None
@@ -243,16 +238,13 @@ def _trova_nome_in_rubrica_locale(phone_number: str) -> str:
     if not target:
         return ""
 
-    # Assicurati di gestire il file come una lista diretta
     lista_clienti = data if isinstance(data, list) else []
 
     for cli in lista_clienti:
-        # Usa la nuova chiave 't' per il telefono
         tel_raw = cli.get("t") or cli.get("telefono") or cli.get("numero") or cli.get("cellulare") or ""
         tel_norm = _normalizza_telefono(tel_raw)
         
         if tel_norm and tel_norm == target:
-            # Usa la nuova chiave 'n' per il nome
             nome_cli = (cli.get("n") or cli.get("nome_cliente") or cli.get("nome") or "").strip()
             
             clean_nome = nome_cli.replace("+", "").replace(" ", "").replace("()", "")
@@ -314,7 +306,7 @@ def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
             return data["records"]
     return []
 
-async def sincronizza_chat_recenti_background():
+async def sincronizza_chat_recenti_background() -> None:
     await asyncio.sleep(3)
     add_whatsapp_log("📥 Avvio sincronizzazione automatica delle chat recenti (ultimi 2 giorni)...", "INFO")
     
@@ -367,7 +359,7 @@ async def sincronizza_chat_recenti_background():
                         continue 
 
                     msg_id = msg.get("key", {}).get("id", "")
-                    if msg_id in messaggi_processati:
+                    if msg_id and await is_messaggio_elaborato(msg_id):
                         continue
 
                     testo = ""
@@ -400,10 +392,10 @@ async def sincronizza_chat_recenti_background():
                     data_ricezione_custom = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') if timestamp else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
                     if not is_vocal and await ordine_esiste_in_db(mittente, testo, None):
-                        messaggi_processati.add(msg_id)
+                        await segna_messaggio_elaborato(msg_id)
                         continue
 
-                    messaggi_processati.add(msg_id)
+                    await segna_messaggio_elaborato(msg_id)
                     processed_count += 1
 
                     # ⏳ FRENO A MANO PER GROQ API: Una chiamata ogni 5 secondi, MAX 12 RPM per azzerare gli errori 429
@@ -418,7 +410,7 @@ async def sincronizza_chat_recenti_background():
     except Exception as e:
         add_whatsapp_log(f"⚠️ Errore durante la sincronizzazione delle chat recenti: {e}", "WARN")
 
-async def elabora_webhook_evolution(payload: dict):
+async def elabora_webhook_evolution(payload: dict) -> None:
     event = payload.get("event")
     data_payload = payload.get("data", {})
 
@@ -503,11 +495,11 @@ async def elabora_webhook_evolution(payload: dict):
                 data_ricezione_custom = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
             chiave_univoca = msg.get("key", {}).get("id", "")
-            if chiave_univoca and chiave_univoca in messaggi_processati:
+            if chiave_univoca and await is_messaggio_elaborato(chiave_univoca):
                 continue
                 
             if chiave_univoca:
-                messaggi_processati.add(chiave_univoca)
+                await segna_messaggio_elaborato(chiave_univoca)
 
             add_whatsapp_log(f"📩 Messaggio catturato da {mittente}: {testo}", "INCOMING")
             asyncio.create_task(_accoda_messaggio_utente(mittente, testo, is_vocal, msg, data_ricezione_custom))
@@ -531,28 +523,11 @@ def scarica_media_evolution(message_obj: dict) -> Optional[dict]:
     return None
 
 def _is_titolare_andrea(mittente: str) -> bool:
-    """
-    Riconosce i messaggi del Titolare (Andrea), che inoltra ordini GIA' COMPLETI
-    e distinti (uno per cliente) messaggio per messaggio: NON vanno mai bufferizzati
-    insieme, altrimenti l'IA li fonde in un unico ordine "integrato" invece di
-    trattarli come ordini separati per (nome, data, ordine).
-    """
     m = (mittente or "").lower()
     return "3334695153" in m or "224257489502407" in m or "andrea aliandro" in m
 
 
-async def _accoda_messaggio_utente(mittente: str, testo: str, is_vocal: bool, msg_raw: dict, data_ricezione_custom: str):
-    """
-    Punto di ingresso "smart" per ogni messaggio in arrivo.
-    - I messaggi del Titolare (Andrea) NON vengono mai bufferizzati: ogni suo
-      messaggio è già un ordine completo e autonomo per un cliente specifico,
-      quindi va processato subito e singolarmente (come prima del debounce).
-    - I messaggi vocali NON vengono bufferizzati (portano audio da trascrivere
-      singolarmente): prima svuotiamo un eventuale buffer testuale pendente,
-      poi processiamo il vocale subito, come prima.
-    - I messaggi di testo dei clienti normali vengono accodati in un buffer per
-      cliente e processati tutti insieme quando il cliente smette di scrivere.
-    """
+async def _accoda_messaggio_utente(mittente: str, testo: str, is_vocal: bool, msg_raw: dict, data_ricezione_custom: str) -> None:
     if _is_titolare_andrea(mittente):
         await _flush_buffer_utente(mittente, motivo="messaggio del Titolare: bypass buffer, ordine già completo")
         asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg_raw, data_ricezione_custom))
@@ -568,13 +543,13 @@ async def _accoda_messaggio_utente(mittente: str, testo: str, is_vocal: bool, ms
         buffer = {
             "testi": [],
             "msg_raw": msg_raw,
-            "data_ricezione_custom": data_ricezione_custom,  # timestamp del PRIMO messaggio del gruppo
+            "data_ricezione_custom": data_ricezione_custom,  
             "timer_task": None,
         }
         message_buffers[mittente] = buffer
 
     buffer["testi"].append(testo)
-    buffer["msg_raw"] = msg_raw  # per media/metadata teniamo comunque l'ultimo messaggio ricevuto
+    buffer["msg_raw"] = msg_raw 
 
     if buffer["timer_task"] and not buffer["timer_task"].done():
         buffer["timer_task"].cancel()
@@ -583,16 +558,15 @@ async def _accoda_messaggio_utente(mittente: str, testo: str, is_vocal: bool, ms
     add_whatsapp_log(f"⏳ Messaggio di {mittente} accodato nel buffer ({len(buffer['testi'])} in coda, invio tra {DEBOUNCE_SECONDS:.0f}s se non arrivano altri).", "INFO")
 
 
-async def _timer_debounce(mittente: str):
+async def _timer_debounce(mittente: str) -> None:
     try:
         await asyncio.sleep(DEBOUNCE_SECONDS)
     except asyncio.CancelledError:
-        return  # è arrivato un nuovo messaggio: il cronometro è stato azzerato altrove
+        return 
     await _flush_buffer_utente(mittente, motivo="timeout debounce raggiunto")
 
 
-async def _flush_buffer_utente(mittente: str, motivo: str = ""):
-    """Unisce tutti i messaggi accodati per il cliente e li invia in un'unica chiamata all'IA."""
+async def _flush_buffer_utente(mittente: str, motivo: str = "") -> None:
     buffer = message_buffers.pop(mittente, None)
     if not buffer or not buffer["testi"]:
         return
@@ -615,7 +589,7 @@ async def _flush_buffer_utente(mittente: str, motivo: str = ""):
     ))
 
 
-async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw: dict, data_ricezione_custom: str):
+async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw: dict, data_ricezione_custom: str) -> None:
     WHATSAPP_STATE["ultimo_messaggio"] = f"{mittente} - {'🎙️ Vocale' if is_vocal else testo}"
     
     audio_data = None
@@ -678,7 +652,6 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
         is_order = ord_singolo.get("is_order", False)
         cliente_finale = ord_singolo.get("cliente_id", mittente)
 
-        # 🚦 Sincronizziamo la scrittura sul DB usando il semaforo (Lock)
         async with DB_WRITE_LOCK:
             if is_cancelled or (storico_di_oggi and not is_order and len(prodotti) == 0 and ("annull" in testo.lower() or "cancell" in testo.lower())):
                 add_whatsapp_log(f"🚫 Ordine per {cliente_finale} ANNULLATO.", "WARN")
@@ -697,7 +670,7 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
             else:
                 add_whatsapp_log(f"ℹ️ Messaggio cortesia relativo a {cliente_finale}", "INFO")
 
-async def forzare_scansione_chat():
+async def forzare_scansione_chat() -> dict:
     await _configura_webhook_evolution()
     asyncio.create_task(sincronizza_chat_recenti_background())
     avvia_loop_sincronizzazione_periodica()
