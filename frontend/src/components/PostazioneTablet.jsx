@@ -26,8 +26,8 @@ export default function PostazioneTablet() {
             ...p,
             // Lascia il lotto completamente vuoto di default per forzare l'inserimento manuale
             numero_lotto: p.numero_lotto || '',
-            // Se è a peso fisso pre-imposta la grammatura fissa, altrimenti vuoto
-            grammatura: p.grammatura || (p.is_peso_fisso ? `${p.peso_unitario_kg} KG` : '')
+            // ORA LA GRAMMATURA E' SEMPRE VUOTA, ANCHE PER I PESI FISSI, PERMETTENDO ALL'OPERATORE DI SCRIVERLA.
+            grammatura: p.grammatura || ''
           }));
         });
         setFormData(initialForm);
@@ -64,20 +64,19 @@ export default function PostazioneTablet() {
         isValid = false;
         break;
       }
-      // Se NON è a peso fisso, deve avere una grammatura valida
-      if (!p.is_peso_fisso) {
-        const pVal = parseFloat(p.grammatura);
-        if (!p.grammatura || isNaN(pVal) || pVal <= 0) {
-          isValid = false;
-          break;
-        }
+      
+      // ORA CONTROLLA LA GRAMMATURA PER TUTTI I PRODOTTI, DATO CHE DEVE ESSERE INSERITA MANUALMENTE.
+      const pVal = parseFloat(p.grammatura);
+      if (!p.grammatura || isNaN(pVal) || pVal <= 0) {
+        isValid = false;
+        break;
       }
     }
 
     if (!isValid) {
       setValidationError(prev => ({
         ...prev,
-        [orderId]: "⚠️ ATTENZIONE: Devi inserire il PESO REALE (per gli articoli da pesare) e il LOTTO per ogni singola riga!"
+        [orderId]: "⚠️ ATTENZIONE: Devi inserire il PESO REALE (per tutti gli articoli) e il LOTTO per ogni singola riga!"
       }));
       return;
     }
@@ -215,29 +214,25 @@ export default function PostazioneTablet() {
                         {p.pezzi_totali && (
                           <span className="text-[10px] text-petruzzi-700 font-mono">Pezzo {p.pezzo_index} di {p.pezzi_totali}</span>
                         )}
+                        {/* Abbiamo rimosso la logica del campo grigio non modificabile, ma lasciamo l'etichetta visiva "Teorico" per aiutare il casaro */}
                         {p.is_peso_fisso && (
                           <span className="ml-1 text-[9px] bg-petruzzi-100 text-petruzzi-800 px-1 py-0.5 rounded font-mono uppercase border border-petruzzi-300">
-                            Peso Fisso
+                            Teorico: {p.peso_unitario_kg} KG
                           </span>
                         )}
                       </div>
 
                       <div className="col-span-3">
-                        {p.is_peso_fisso ? (
-                           <div className="w-full bg-gray-100 border border-gray-300 text-gray-600 font-bold text-sm rounded-lg px-3 py-2 text-center">
-                             {p.grammatura}
-                           </div>
-                        ) : (
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="es. 0.350"
-                            value={p.grammatura}
-                            onChange={(e) => handleProductChange(ord.id, pIdx, 'grammatura', e.target.value)}
-                            disabled={isConfezionato}
-                            className="w-full bg-white border border-amber-400 text-amber-950 font-extrabold text-sm rounded-lg px-3 py-2 outline-none focus:border-petruzzi-700 disabled:opacity-60 shadow-inner"
-                          />
-                        )}
+                        {/* Il campo di input ORA è uguale per tutti, vuoto e libero per l'inserimento */}
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="es. 0.350"
+                          value={p.grammatura}
+                          onChange={(e) => handleProductChange(ord.id, pIdx, 'grammatura', e.target.value)}
+                          disabled={isConfezionato}
+                          className="w-full bg-white border border-amber-400 text-amber-950 font-extrabold text-sm rounded-lg px-3 py-2 outline-none focus:border-petruzzi-700 disabled:opacity-60 shadow-inner"
+                        />
                       </div>
 
                       <div className="col-span-3">

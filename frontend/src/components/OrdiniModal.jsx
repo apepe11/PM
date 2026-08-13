@@ -9,7 +9,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const [note, setNote] = useState('');
   const [clientiRegistrati, setClientiRegistrati] = useState([]);
   const [prodotti, setProdotti] = useState([
-    { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg' }
+    { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg', grammatura: '', numero_lotto: '' }
   ]);
 
   useEffect(() => {
@@ -46,12 +46,15 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
       }
       setDataConsegna(editingOrder.data_consegna || new Date().toISOString().split('T')[0]);
       setNote(editingOrder.note_ordine || '');
+      
       if (editingOrder.prodotti && editingOrder.prodotti.length > 0) {
         setProdotti(editingOrder.prodotti.map(p => ({
           codice_articolo: p.codice_articolo || '',
           nome_articolo: p.nome_articolo || p.codice_articolo || '',
-          quantita: p.quantita !== undefined ? p.quantita.toString() : "1", // Salviamo come stringa provvisoria
-          unita_di_misura: p.unita_di_misura || 'kg'
+          quantita: p.quantita !== undefined ? p.quantita.toString() : "1",
+          unita_di_misura: p.unita_di_misura || 'kg',
+          grammatura: p.grammatura || '',
+          numero_lotto: p.numero_lotto || editingOrder.numero_lotto || ''
         })));
       }
     } else {
@@ -63,7 +66,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
       setDataConsegna(new Date().toISOString().split('T')[0]);
       setNote('');
       setProdotti([
-        { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg' }
+        { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg', grammatura: '', numero_lotto: '' }
       ]);
     }
   }, [editingOrder, isOpen, clientiRegistrati]);
@@ -73,7 +76,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const handleAddProductRow = () => {
     setProdotti([
       ...prodotti,
-      { codice_articolo: 'TRSCAPE', nome_articolo: 'Treccia di Scamorza Petruzzi', quantita: "1", unita_di_misura: 'pezzi' }
+      { codice_articolo: 'TRSCAPE', nome_articolo: 'Treccia di Scamorza Petruzzi', quantita: "1", unita_di_misura: 'pezzi', grammatura: '', numero_lotto: '' }
     ]);
   };
 
@@ -94,7 +97,6 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
         updated[index].unita_di_misura = hasWeight ? 'pezzi' : 'kg';
       }
     } else if (field === 'quantita') {
-      // Permette numeri, punti, virgole e il segno meno per i valori negativi
       updated[index].quantita = value.replace(/[^0-9.,-]/g, ''); 
     } else {
       updated[index][field] = value;
@@ -107,7 +109,6 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
     const finalMittente = isNuovoCliente ? mittenteInput.trim() : mittenteSelect.trim();
     if (!finalMittente) return;
 
-    // Convertiamo le stringhe in numeri float (sostituendo eventuali virgole con punti) prima di salvare
     const finalProdotti = prodotti.map(p => ({
         ...p,
         quantita: parseFloat(p.quantita.toString().replace(',', '.')) || 0
@@ -125,7 +126,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
 
   return (
     <div className="fixed inset-0 z-50 bg-petruzzi-950/60 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-fadeIn font-sans">
-      <div className="bg-[#FFFDF9] border border-petruzzi-300 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl text-petruzzi-950">
+      <div className="bg-[#FFFDF9] border border-petruzzi-300 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl text-petruzzi-950">
         
         {/* Modal Header */}
         <div className="bg-petruzzi-800 px-6 py-4 border-b border-petruzzi-900 flex items-center justify-between">
@@ -222,7 +223,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-bold text-petruzzi-800 uppercase tracking-wider">
-                Articoli Catalogo e Quantità
+                Articoli Catalogo, Quantità, Grammatura e Lotto
               </label>
               <button
                 type="button"
@@ -234,7 +235,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
               </button>
             </div>
 
-            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
               {prodotti.map((p, idx) => {
                 const existsInCatalog = prodottiCatalogo.some(cat => (cat.c || cat.codice_prodotto) === p.codice_articolo);
                 
@@ -262,24 +263,43 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
                       })}
                     </select>
 
-                    {/* Quantity Input - ORA E' UN CAMPO DI TESTO PER GESTIRE VIRGOLE E DECIMALI IN MODO LIBERO */}
+                    {/* Quantity Input */}
                     <input
                       type="text"
                       inputMode="decimal"
+                      placeholder="Q.tà"
                       value={p.quantita}
                       onChange={(e) => handleProductChange(idx, 'quantita', e.target.value)}
-                      className="w-20 bg-white border border-petruzzi-300 text-petruzzi-950 font-black text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
+                      className="w-16 bg-white border border-petruzzi-300 text-petruzzi-950 font-black text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
                     />
 
                     {/* Unit of Measure Select */}
                     <select
                       value={p.unita_di_misura}
                       onChange={(e) => handleProductChange(idx, 'unita_di_misura', e.target.value)}
-                      className="w-20 bg-white border border-petruzzi-300 text-petruzzi-800 uppercase font-bold text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
+                      className="w-16 bg-white border border-petruzzi-300 text-petruzzi-800 uppercase font-bold text-center rounded-xl px-1 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm"
                     >
                       <option value="kg">KG</option>
                       <option value="pezzi">PZ</option>
                     </select>
+
+                    {/* Grammatura Input (Vuoto di default o modificabile) */}
+                    <input
+                      type="text"
+                      placeholder="Grammatura"
+                      value={p.grammatura}
+                      onChange={(e) => handleProductChange(idx, 'grammatura', e.target.value)}
+                      className="w-24 bg-white border border-petruzzi-300 text-petruzzi-950 text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm placeholder:text-gray-400"
+                    />
+
+                    {/* Lotto Input (Vuoto di default o modificabile) */}
+                    <input
+                      type="text"
+                      placeholder="N° Lotto"
+                      value={p.numero_lotto}
+                      onChange={(e) => handleProductChange(idx, 'numero_lotto', e.target.value.toUpperCase())}
+                      className="w-24 bg-white border border-petruzzi-300 text-petruzzi-950 font-mono text-center rounded-xl px-2 py-2 text-xs focus:outline-none focus:border-petruzzi-700 shadow-sm placeholder:text-gray-400"
+                    />
 
                     {/* Remove Row Button */}
                     <button
