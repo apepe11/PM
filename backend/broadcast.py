@@ -1,19 +1,22 @@
 import asyncio
 import logging
+import aiosqlite
 from datetime import datetime
 from backend.db import (
     get_broadcast_schedulati,
     get_broadcast_liste,
-    registra_broadcast_log
+    registra_broadcast_log,
+    DB_FILE
 )
 
 async def invia_messaggio_whatsapp_singolo(page, destinatario: str, messaggio: str) -> bool:
-    """Invia un messaggio WhatsApp ad un singolo contatto tramite Playwright Web."""
+    """Invia un messaggio WhatsApp ad un singolo contatto tramite Playwright Web in modo resiliente."""
     if not page or page.is_closed():
         logging.warning(f"⚠️ Broadcast: pagina non disponibile, invio a '{destinatario}' saltato.")
         return False
+        
     try:
-        # Cerca il contatto e clicca per aprire la chat
+        # Cerca il contatto e clicca per aprire la chat con gestione dell'attesa
         chat_opened = await page.evaluate(f'''(name) => {{
             const rows = document.querySelectorAll('div[role="row"]');
             for (const r of rows) {{
@@ -27,45 +30,51 @@ async def invia_messaggio_whatsapp_singolo(page, destinatario: str, messaggio: s
         }}''', destinatario)
 
         if not chat_opened:
-            logging.warning(f"⚠️ Broadcast: Contatto '{destinatario}' non trovato in chat visibili.")
+            logging.warning(f"⚠️ Broadcast: Contatto '{destinatario}' non trovato nella lista chat visibili.")
             return False
 
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(2) # Attesa stabilizzazione UI
 
-        # Scrive il messaggio nella casella di testo e simula l'invio
+        # Scrive il messaggio e verifica l'effettivo invio
         sent = await page.evaluate(f'''(text) => {{
             return new Promise((resolve) => {{
                 const footer = document.querySelector('footer');
                 if (!footer) return resolve(false);
+                
                 const input = footer.querySelector('div[contenteditable="true"]');
                 if (!input) return resolve(false);
+                
                 input.focus();
                 document.execCommand('insertText', false, text);
 
                 setTimeout(() => {{
-                    const sendBtn = footer.querySelector('span[data-icon="send"]') || footer.querySelector('button[aria-label*="Invia"]') || footer.querySelector('button');
+                    const sendBtn = footer.querySelector('span[data-icon="send"]') || 
+                                    footer.querySelector('button[aria-label*="Invia"]') || 
+                                    footer.querySelector('button');
                     if (sendBtn) {{
                         sendBtn.click();
                         setTimeout(() => {{
+                            // Se l'input è vuoto, il messaggio è partito
                             const stillThere = input.innerText && input.innerText.trim().length > 0;
                             resolve(!stillThere);
-                        }}, 500);
+                        }}, 800);
                     }} else {{
                         resolve(false);
                     }}
-                }}, 300);
+                }}, 500);
             }});
         }}''', messaggio)
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(2.5) # Pausa di sicurezza post-invio
         return sent
+        
     except Exception as e:
-        logging.error(f"❌ Errore invio broadcast a {destinatario}: {e}")
+        logging.error(f"❌ Errore critico invio broadcast a {destinatario}: {e}")
         return False
 
 async def avvia_demone_broadcast(page_getter_func):
-    """Demone schedulatore in background che verifica ogni 30s i broadcast programmati ed invia i messaggi."""
-    logging.info("🚀 Demone Schedulatore Broadcast WhatsApp avviato (Controllo ogni 30s)...")
+    """Demone schedulatore in background ad alta affidabilità."""
+    logging.info("🚀 Demone Schedulatore Broadcast WhatsApp avviato (Polling ogni 30s)...")
     
     while True:
         try:
@@ -89,65 +98,59 @@ async def avvia_demone_broadcast(page_getter_func):
                         should_run = True
                 else:
                     time_part = orario.split()[-1] if ' ' in orario else orario
+                    # Evita invii multipli nello stesso giorno
                     if time_part[:5] == now_time_str and not data_invio.startswith(now.strftime('%Y-%m-%d')):
                         if ric == "TUTTI_I_GIORNI":
                             should_run = True
                         elif ric == "GIORNI_FERIALI" and now.weekday() < 5:
                             should_run = True
-                        elif ric == "OGNI_LUNEDI" and weekday_eng == "MONDAY":
-                            should_run = True
-                        elif ric == "OGNI_MARTEDI" and weekday_eng == "TUESDAY":
-                            should_run = True
-                        elif ric == "OGNI_MERCOLEDI" and weekday_eng == "WEDNESDAY":
-                            should_run = True
-                        elif ric == "OGNI_GIOVEDI" and weekday_eng == "THURSDAY":
-                            should_run = True
-                        elif ric == "OGNI_VENERDI" and weekday_eng == "FRIDAY":
-                            should_run = True
-                        elif ric == "OGNI_SABATO" and weekday_eng == "SATURDAY":
-                            should_run = True
-                        elif ric == "OGNI_DOMENICA" and weekday_eng == "SUNDAY":
+                        elif ric == f"OGNI_{weekday_eng}": # Verifica dinamica del giorno
                             should_run = True
                 
                 if should_run:
-                    logging.info(f"📢 Esecuzione Broadcast ID #{item['id']} ({ric}) per lista '{item['nome_lista']}'...")
+                    logging.info(f"📢 Esecuzione Task ID #{item['id']} ({ric}) per lista '{item['nome_lista']}'...")
                     
                     page = page_getter_func()
                     liste = await get_broadcast_liste()
                     target_lista = next((l for l in liste if l["id"] == item.get("id_lista")), None)
                     
-                    contatti = target_lista.get("contatti", []) if target_lista else []
+                    if not target_lista:
+                        logging.warning(f"⚠️ Lista ID {item.get('id_lista')} non trovata.")
+                        continue
+                        
+                    contatti = target_lista.get("contatti", [])
                     messaggio = item.get("messaggio", "")
 
                     for c in contatti:
                         page = page_getter_func()
                         if not page or page.is_closed():
-                            logging.warning(f"⚠️ Broadcast ID #{item['id']}: WhatsApp disconnesso, interrompo invii rimanenti.")
+                            logging.error(f"❌ WhatsApp disconnesso durante l'invio. Interruzione task #{item['id']}.")
                             break
+                            
                         nome_dest = c.get("nome") or c.get("telefono") or str(c)
                         esito = await invia_messaggio_whatsapp_singolo(page, nome_dest, messaggio)
                         stato_log = "INVIATO" if esito else "FALLITO"
                         await registra_broadcast_log(item["id"], nome_dest, messaggio, stato_log)
-                        await asyncio.sleep(3) # Pausa anti-spam tra invii
+                        
+                        await asyncio.sleep(4) # Rate-limiting per evitare ban da WhatsApp
 
-                    import aiosqlite
-                    from backend.db import DB_FILE
                     async with aiosqlite.connect(DB_FILE) as db:
+                        timestamp_completamento = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         if ric == "UNA_TANTUM":
                             await db.execute(
                                 "UPDATE broadcast_schedulati SET stato = 'INVIATO', data_invio = ? WHERE id = ?",
-                                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), item["id"])
+                                (timestamp_completamento, item["id"])
                             )
                         else:
                             await db.execute(
                                 "UPDATE broadcast_schedulati SET data_invio = ? WHERE id = ?",
-                                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), item["id"])
+                                (timestamp_completamento, item["id"])
                             )
                         await db.commit()
                         
-                    logging.info(f"✅ Broadcast ID #{item['id']} ({ric}) completato.")
+                    logging.info(f"✅ Task ID #{item['id']} completato con successo.")
 
         except Exception as e:
-            logging.error(f"⚠️ Errore nel demone broadcast: {e}")
+            logging.error(f"⚠️ Eccezione non gestita nel demone broadcast: {e}")
 
         await asyncio.sleep(30)

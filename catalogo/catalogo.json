@@ -54,11 +54,11 @@
 {"c":"MANTEPC","n":"Manteca PETRUZZI Conf.","p":0.35,"s":"manteca confezionata,manteca conf,manteche confezionate, burrini confezionati, burrino confezionato, burrino conf, burrini conf, burrino sottovuoto, burrini sottovuoto"},
 {"c":"MANTEPE","n":"Manteca PETRUZZI","p":0.35,"s":"manteca,manteche,manteca petruzzi,manteca sfusa, burrino, burrini"},
 {"c":"RIC","n":"Delat ricotta","p":0.25,"s":"ricotta delat,ricotta senza lattosio,delat ricotte,ricotte delat"},
+{"c":"RICOTPE","n":"Ricotta 0,500KG PETRUZZI","p":0.5,"s":"ricotta,ricotte,ricotta fresca,ricotta sfusa,ricotta 500g, ricotta classica , ricotte classiche"},
 {"c":"RIC300","n":"Ricotta 300g","p":0.3,"s":"ricotta 300g,ricottina 300g,vaschetta ricotta 300g,ricotta 300"},
 {"c":"RICCARTA0500","n":"Ricotta in carta 0,500KG","p":0.5,"s":"ricotta in carta,ricotta in carta da 0.500kg,ricotta in carta da 500g, ricotta carta 500g"},
 {"c":"RICPIC","n":"Ricottine","p":0.08,"s":"ricottina,ricottine,ricottina piccola,ricottine fresche"},
 {"c":"RICSAPE","n":"ricotta salata PETRUZZI","p":0.25,"s":"ricotta salata,ricotta dura,salata,ricotta da grattugiare, cacioricotta"},
-{"c":"RICOTPE","n":"Ricotta 0,500KG PETRUZZI","p":0.5,"s":"ricotta,ricotte,ricotta fresca,ricotta sfusa,ricotta 500g, ricotta classica , ricotte classiche"},
 {"c":"RISALDELAT","n":"Ricotta Salata Delat","p":0.15,"s":"ricotta salata delat,ricotta salata senza lattosio"},
 {"c":"TOMA","n":"Toma 0,500KG","p":0.5,"s":"toma,toma da 0.500kg,toma 500g"},
 {"c":"TOMA DELAT","n":"Toma Delat 0,500KG","p":0.5,"s":"toma delat,toma senza lattosio,toma delat da 0.500kg"},
@@ -84,5 +84,6 @@
 {"c":"SOPPRESS","n":"Soppressata","p":0.35,"s":"soppressata,soppressate"},
 {"c":"PANGRPE","n":"Panna grezza non destinata al consumo diretto PETRUZZI","p":null,"s":"panna grezza,panna"},
 {"c":"PETRZ0250PE","n":"Petruzzella 0,250KG PETRUZZI","p":0.25,"s":"petruzzella,petruzzelle,petruzzella 250g,vaschetta petruzzella"},
+{"c":"PETRZ01PE","n":"Petruzzella 1KG PETRUZZI","p":1,"s":"petruzzella da kg, petruzzella kg,petruzzella 1kg"},
 {"c":"TORT","n":"Torta farcita PETRUZZI","p":0.7,"s":"torta farcita,torta di formaggio"}
 ]

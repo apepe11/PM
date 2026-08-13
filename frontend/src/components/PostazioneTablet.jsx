@@ -202,28 +202,35 @@ export default function PostazioneTablet() {
 
                 <div className="bg-petruzzi-50 p-4 rounded-xl border border-petruzzi-200 space-y-3">
                   <div className="grid grid-cols-12 gap-4 pb-2 border-b border-petruzzi-200 text-xs font-black text-petruzzi-800 uppercase tracking-wider">
-                    <div className="col-span-6">Articolo in distinto</div>
+                    {/* Allargata la colonna dell'articolo per ospitare la quantità */}
+                    <div className="col-span-6">Quantità & Articolo</div>
                     <div className="col-span-3">⚖️ Peso (KG)</div>
                     <div className="col-span-3"># Lotto</div>
                   </div>
 
                   {currentProds.map((p, pIdx) => (
                     <div key={pIdx} className="grid grid-cols-12 gap-4 items-center bg-white p-2 rounded-lg border border-petruzzi-200 shadow-sm">
-                      <div className="col-span-6">
-                        <span className="font-bold text-petruzzi-950 block">{p.nome_articolo || p.codice_articolo}</span>
-                        {p.pezzi_totali && (
-                          <span className="text-[10px] text-petruzzi-700 font-mono">Pezzo {p.pezzo_index} di {p.pezzi_totali}</span>
-                        )}
-                        {/* Abbiamo rimosso la logica del campo grigio non modificabile, ma lasciamo l'etichetta visiva "Teorico" per aiutare il casaro */}
-                        {p.is_peso_fisso && (
-                          <span className="ml-1 text-[9px] bg-petruzzi-100 text-petruzzi-800 px-1 py-0.5 rounded font-mono uppercase border border-petruzzi-300">
-                            Teorico: {p.peso_unitario_kg} KG
-                          </span>
-                        )}
+                      <div className="col-span-6 flex items-start space-x-3">
+                        {/* BOX QUANTITÀ: Bello visibile a sinistra del nome */}
+                        <div className="flex-shrink-0 min-w-[3.5rem] bg-petruzzi-800 text-white text-center rounded-lg py-1 px-2 flex flex-col justify-center items-center shadow-sm">
+                          <span className="text-sm font-black leading-none">{p.quantita}</span>
+                          <span className="text-[9px] uppercase font-bold tracking-wider leading-none mt-1">{p.unita_di_misura}</span>
+                        </div>
+                        
+                        <div>
+                          <span className="font-bold text-petruzzi-950 block leading-tight">{p.nome_articolo || p.codice_articolo}</span>
+                          {p.pezzi_totali && (
+                            <span className="text-[10px] text-petruzzi-700 font-mono block mt-0.5">Pezzo {p.pezzo_index} di {p.pezzi_totali}</span>
+                          )}
+                          {p.is_peso_fisso && (
+                            <span className="inline-block mt-1 text-[9px] bg-petruzzi-100 text-petruzzi-800 px-1 py-0.5 rounded font-mono uppercase border border-petruzzi-300">
+                              Teorico: {p.peso_unitario_kg} KG
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="col-span-3">
-                        {/* Il campo di input ORA è uguale per tutti, vuoto e libero per l'inserimento */}
                         <input
                           type="number"
                           step="0.01"

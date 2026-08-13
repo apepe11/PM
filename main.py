@@ -351,6 +351,27 @@ async def download_pdf_ordini_confezionati_banco(data: Optional[str] = Query(Non
 async def list_clienti():
     return await get_lista_clienti_registrati()  # type: ignore
 
+# --- NUOVA ROUTE: Aggiungi Cliente al JSON ---
+@app.post("/api/clienti")
+async def add_cliente(payload: dict = Body(...)):
+    clienti_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "catalogo", "particolarita_clienti.json"))
+    
+    try:
+        with open(clienti_path, 'r', encoding='utf-8') as f:
+            clienti = json.load(f)
+    except FileNotFoundError:
+        clienti = []
+        
+    # Pulisce i campi vuoti passati dal frontend
+    cliente_pulito = {k: v for k, v in payload.items() if v}
+    clienti.append(cliente_pulito)
+    
+    # Salva di nuovo nel file JSON preservando la codifica
+    with open(clienti_path, 'w', encoding='utf-8') as f:
+        json.dump(clienti, f, indent=2, ensure_ascii=False)
+        
+    return {"status": "success", "message": "Cliente aggiunto al file JSON."}
+
 # --- MODIFICA FONDAMENTALE: L'API prende una lista di prodotti pesati ---
 @app.put("/api/ordini/{id_ordine}/confezione")
 async def update_confezionamento(id_ordine: int, payload: dict = Body(...)):

@@ -11,7 +11,7 @@ const isCaciocavalloSilanoDop = (prod) => {
   return nome.includes('caciocavallo silano') || (nome.includes('caciocavallo') && nome.includes('dop'));
 };
 
-const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConfirmId, setDeleteConfirmId }) => {
+const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConfirmId, setDeleteConfirmId, onOpenRename }) => {
   const [prodotti, setProdotti] = useState(ord.prodotti || []);
 
   useEffect(() => {
@@ -60,12 +60,21 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
     >
       <div className="w-full lg:w-64 shrink-0 space-y-3 pb-4 lg:pb-0 border-b lg:border-b-0 lg:border-r border-petruzzi-200 lg:pr-6 flex flex-col justify-between">
         <div>
-          <div className="flex items-center justify-between lg:block">
-            <h3 className="font-black text-petruzzi-950 text-xl tracking-tight leading-snug">
-              {ord.mittente ? ord.mittente.split('(')[0].trim() : ''}
-            </h3> 
+          <div className="flex flex-col lg:block">
+            <div className="flex items-center space-x-2 mb-1 lg:mb-2">
+              <h3 className="font-black text-petruzzi-950 text-xl tracking-tight leading-snug truncate" title={ord.mittente}>
+                {ord.mittente ? ord.mittente.split('(')[0].trim() : ''}
+              </h3>
+              <button 
+                onClick={() => onOpenRename(ord.mittente)}
+                className="p-1.5 bg-petruzzi-100 hover:bg-petruzzi-200 text-petruzzi-800 rounded-lg transition border border-petruzzi-300 flex-shrink-0"
+                title="Associa/Cambia Nome in Rubrica"
+              >
+                ✏️
+              </button>
+            </div>
            {ord.da_verificare_manualmente && (
-              <span className="lg:mt-2 inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-200 text-amber-950 text-[11px] font-black uppercase border border-amber-400 shadow-sm animate-pulse">
+              <span className="lg:mt-1 inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-200 text-amber-950 text-[11px] font-black uppercase border border-amber-400 shadow-sm animate-pulse w-fit">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-800" />
                 <span>Da Verificare</span>
               </span>
@@ -268,12 +277,52 @@ export default function PreparazioneOrdini({ ordini, selectedDate, setSelectedDa
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
+  // Stati per la modale Cambia/Associa Nome in Rubrica
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameData, setRenameData] = useState({ n: '', t: '', p: '' });
+
   const filteredOrdini = ordini.filter(o => {
     const matchesDate = !selectedDate || o.data_consegna === selectedDate;
     const matchesClient = o.mittente.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesProduct = o.prodotti.some(p => (p.nome_articolo || p.codice_articolo).toLowerCase().includes(searchTerm.toLowerCase()));
     return matchesDate && (matchesClient || matchesProduct);
   });
+
+  const handleOpenRename = (mittenteString) => {
+    // Estrae il numero dalle parentesi tonde, es: (+393331234567)
+    const phoneMatch = mittenteString.match(/\(\+?([\d\s]+)\)/);
+    const rawPhone = phoneMatch ? phoneMatch[1].replace(/\s/g, '') : '';
+    
+    // Rimuove il numero in parentesi per ottenere il nome temporaneo
+    const currentName = mittenteString.replace(/\(\+?[\d\s]+\)/, '').trim();
+
+    setRenameData({
+      n: currentName, 
+      t: rawPhone,    
+      p: ''           
+    });
+    setShowRenameModal(true);
+  };
+
+  const handleSaveNewName = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/clienti', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(renameData)
+      });
+      
+      if (res.ok) {
+        alert(`✅ Nome aggiornato in rubrica! Dal prossimo ordine verrà riconosciuto come "${renameData.n}".`);
+        setShowRenameModal(false);
+      } else {
+        alert("⚠️ Si è verificato un problema durante il salvataggio in rubrica.");
+      }
+    } catch (error) {
+      alert("❌ Errore di connessione durante il salvataggio.");
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -381,10 +430,61 @@ export default function PreparazioneOrdini({ ordini, selectedDate, setSelectedDa
               onDeleteOrder={onDeleteOrder}
               deleteConfirmId={deleteConfirmId}
               setDeleteConfirmId={setDeleteConfirmId}
+              onOpenRename={handleOpenRename}
             />
           ))
         )}
       </div>
+
+      {/* MODAL CAMBIA NOME */}
+      {showRenameModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <h2 className="text-lg font-black text-petruzzi-950 border-b pb-2">Associa Nome in Rubrica</h2>
+            
+            <form onSubmit={handleSaveNewName} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-petruzzi-800 mb-1">Nome Reale (es. Pizzeria da Mario)</label>
+                <input 
+                  type="text" required
+                  value={renameData.n}
+                  onChange={e => setRenameData({...renameData, n: e.target.value})}
+                  className="w-full border border-petruzzi-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-petruzzi-700"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-petruzzi-800 mb-1">Numero (Estratto in automatico)</label>
+                <input 
+                  type="text" required
+                  value={renameData.t}
+                  onChange={e => setRenameData({...renameData, t: e.target.value})}
+                  className="w-full border border-petruzzi-300 rounded-lg px-3 py-2 text-sm bg-gray-50 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-petruzzi-800 mb-1">Particolarità / Regole IA (Opzionale)</label>
+                <input 
+                  type="text" placeholder="es. Filoni da 1.2kg"
+                  value={renameData.p}
+                  onChange={e => setRenameData({...renameData, p: e.target.value})}
+                  className="w-full border border-petruzzi-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-petruzzi-700"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-2">
+                <button type="button" onClick={() => setShowRenameModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition">
+                  Annulla
+                </button>
+                <button type="submit" className="px-4 py-2 text-sm font-bold text-white bg-petruzzi-800 hover:bg-petruzzi-900 rounded-lg transition">
+                  💾 Salva Nome
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -20,11 +20,8 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
             </div>
             <div>
               <h1 className="text-base font-black text-petruzzi-950 tracking-tight leading-tight">
-                Caseificio Petruzzi
+                Caseificio Petruzzi Manager
               </h1>
-              <span className="text-[10px] font-extrabold text-petruzzi-700 block tracking-wider uppercase">
-                Dal 1923 • Legami di Latte
-              </span>
             </div>
           </div>
 
@@ -46,19 +43,6 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
               >
                 <Tablet className="w-3.5 h-3.5" />
                 <span>Tablet</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('admin')}
-                className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
-                  activeTab === 'admin'
-                    ? 'bg-emerald-800 text-white'
-                    : 'text-emerald-800 hover:bg-emerald-100'
-                }`}
-                title="Hub Remoto Titolare"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Titolare</span>
               </button>
             </div>
             
@@ -92,35 +76,42 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
               </button>
             )}
 
-            {/* Navigation Dropdown Menu */}
-            <div className="relative">
-              <select
-                value={activeTab}
-                onChange={(e) => {
-                  if (e.target.value === 'nuovo-ordine') {
-                    onOpenNewOrderModal();
-                  } else {
-                    setActiveTab(e.target.value);
-                  }
-                }}
-                className="bg-gradient-to-r from-petruzzi-700 to-petruzzi-800 text-white font-black text-xs rounded-xl pl-3.5 pr-8 py-2 outline-none cursor-pointer shadow-md border border-petruzzi-900 hover:from-petruzzi-800 hover:to-petruzzi-900 transition appearance-none"
-              >
-                <option value="connessione" className="bg-white text-emerald-800 font-bold">📲 Connessione Banco WhatsApp</option>
-                <option value="nuovo-ordine" className="bg-petruzzi-100 text-petruzzi-950 font-black">➕ Creazione Nuovo Ordine</option>
-                <option value="produzione" className="bg-white text-petruzzi-950 font-bold">🏭 Produzione Casaro</option>
-                <option value="filoni" className="bg-white text-petruzzi-950 font-bold">🍕 Filoni Pizzeria</option>
-                
-                {/* NUOVA VOCE SOLE 365 */}
-                <option value="sole" className="bg-amber-50 text-amber-900 font-bold">☀️ Ordini Gruppo Sole 365</option>
-                
-                <option value="ordini" className="bg-white text-petruzzi-950 font-bold">📦 Ordini Clienti (Tutti)</option>
-                <option value="confermati" className="bg-white text-emerald-800 font-bold">✅ Ordini Confermati</option>
-                <option value="broadcast" className="bg-white text-petruzzi-900 font-bold">📢 Broadcast & Notifiche</option>
-                <option value="statistiche" className="bg-white text-petruzzi-950 font-bold">📊 Statistiche & Controllo</option>
-              </select>
-              <ChevronDown className="w-4 h-4 text-white absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none stroke-[3]" />
-            </div>
+           {/* Navigation Dropdown Menu */}
+              <div className="relative">
+                <select
+                  value={activeTab}
+                  onChange={(e) => {
+                    if (e.target.value === 'nuovo-ordine') {
+                      onOpenNewOrderModal();
+                    } else {
+                      setActiveTab(e.target.value);
+                    }
+                  }}
+                  className="bg-gradient-to-r from-petruzzi-700 to-petruzzi-800 text-white font-black text-xs rounded-xl pl-3.5 pr-8 py-2 outline-none cursor-pointer shadow-md border border-petruzzi-900 hover:from-petruzzi-800 hover:to-petruzzi-900 transition appearance-none"
+                >
+                  {/* GRUPPO 1: Gestione Principale */}
+                  <option value="produzione" className="bg-white text-petruzzi-950 font-bold">🏭 Produzione Casaro</option>
+                  <option value="ordini" className="bg-white text-petruzzi-950 font-bold">📦 Ordini Clienti</option>
+                  <option value="nuovo-ordine" className="bg-petruzzi-100 text-petruzzi-950 font-black">➕ Creazione Nuovo Ordine</option>
+                  <option value="confermati" className="bg-white text-emerald-800 font-bold">✅ Ordini Confermati</option>
+                  {/* SPAZIO VUOTO NON SELEZIONABILE */}
+                  <option disabled className="bg-gray-100 text-gray-400 text-center font-normal">──────────</option>
 
+                  {/* GRUPPO 2: Viste Specifiche */}
+                  
+                  <option value="filoni" className="bg-white text-petruzzi-950 font-bold">🍕 Filoni Pizzeria</option>
+                  <option value="sole" className="bg-amber-50 text-amber-900 font-bold">☀️ Ordini Gruppo Sole 365</option>
+                  
+                  {/* SPAZIO VUOTO NON SELEZIONABILE */}
+                  <option disabled className="bg-gray-100 text-gray-400 text-center font-normal">──────────</option>
+
+                  {/* GRUPPO 3: Strumenti e Amministrazione */}
+                  <option value="broadcast" className="bg-white text-petruzzi-900 font-bold">📢 Broadcast & Notifiche</option>
+                  <option value="statistiche" className="bg-white text-petruzzi-950 font-bold">📊 Statistiche & Controllo</option>
+                  <option value="connessione" className="bg-white text-emerald-800 font-bold">📲 Connessione Banco WhatsApp</option>
+                </select>
+                <ChevronDown className="w-4 h-4 text-white absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none stroke-[3]" />
+              </div>
           </div>
 
         </div>

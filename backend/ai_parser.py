@@ -38,10 +38,6 @@ def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_
     h = ora_attuale.hour
     wd = ora_attuale.weekday()
 
-    # Rimosso il blocco if is_andrea che forzava "OGGI".
-    # Ora i messaggi inoltrati dal titolare, se non hanno data specificata nel testo,
-    # seguiranno la normale logica oraria delle 08:00 basata sull'ora di inoltro.
-
     if h < 8:
         data_target = ora_attuale
         desc = (
@@ -203,9 +199,13 @@ class AIParser:
         CATALOGO: {catalog_formatted}
         {regole_cliente}
 
+        MAPPATURA PRODOTTI AMBIGUI (MASSIMA ATTENZIONE):
+        1. SCAMORZE: Se il cliente chiede "scamorze" o "scamorza" (bianche, affumicate, ecc.) senza specificare le parole "confezionate", "conf" o "imbustate", DEVI usare ESCLUSIVAMENTE la versione SFUSA (es. SCABIPE, SCAAFPE). Usa la versione "Conf." SOLO se c'è scritto esplicitamente "confezionate" o "conf".
+        2. RICOTTA: Se il cliente chiede "ricotta" o "ricotte" senza specificare il peso, DEVI usare SEMPRE di default la Ricotta classica da 500g (codice RICOTPE). Usa la Ricotta da 300g (RIC300) o le Ricottine (RICPIC) SOLO SE scrive esplicitamente "300g", "piccole" o "ricottina".
+
         MAPPATURA QUANTITÀ E RESI:
         - Usa ESATTAMENTE Codice/Nome. 
-        - Se la quantità è preceduta da "N", "n.", "n" (es. "N3 scamorze", "n 4 filoni"), significa SEMPRE e SOLO "pezzi", MAI "kg".
+        - Se la quantità indica "N", "n.", "n", "pezzo", "pezzi" o "pz" (es. "N3 scamorze", "2 pezzi", "pz 4"), significa SEMPRE e SOLO "pezzi", MAI "kg".
         - Pezzi->pezzi, g/Kg sfusi->kg. 
         - Se chiede reso/cambio, calcola SOLO il saldo netto da consegnare in "prodotti". Note reso in "note_ordine".
 
@@ -359,7 +359,7 @@ class AIParser:
                             match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', nome.replace(',', '.'))
                             peso_unitario = float(match_kg.group(1)) if match_kg else 0.0
 
-                            if peso_unitario > 0 and um in ["pezzi", "pz", "vaschette", "unità"]:
+                            if peso_unitario > 0 and um in ["pezzi", "pz", "pezzo", "vaschette", "unità"]:
                                 p["quantita"] = round(qta * peso_unitario, 3)
                                 p["unita_di_misura"] = "kg"
 
@@ -414,7 +414,7 @@ class AIParser:
             syns = [s.strip().lower() for s in (item.get("s") or "").split(",") if s.strip()]
             syn_entries.append({"cod": cod, "nome": nome, "um": um_default, "sinonimi": syns})
 
-        pattern = r'([Nn][°\.\s]+|[Nn](?=\d))?(\d+(?:[.,]\d+)?)\s*(kg|k|chili|kili|g|gr|grammi|pz|pezzi|coppia|coppie|vaschette|vaschetta|cf)?\s*(?:di\s+)?([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{3,35})'
+        pattern = r'([Nn][°\.\s]+|[Nn](?=\d)|[Pp]ezzo\s+|[Pp]ezzi\s+|[Pp]z\s+)?(\d+(?:[.,]\d+)?)\s*(kg|k|chili|kili|g|gr|grammi|pz|pezzi|pezzo|coppia|coppie|vaschette|vaschetta|cf)?\s*(?:di\s+)?([a-zA-ZàèéìòùÀÈÉÌÒÙ\s]{3,35})'
         matches = re.findall(pattern, text_to_parse or "", re.IGNORECASE)
 
         for n_prefix, qta_str, um_raw, prod_raw in matches:
@@ -430,7 +430,7 @@ class AIParser:
             um_clean = (um_raw or "").strip().lower()
             
             um_finale = "kg"
-            if n_prefix or um_clean in ["pz", "pezzi", "coppia", "coppie", "vaschetta", "vaschette", "cf"]:
+            if n_prefix or um_clean in ["pz", "pezzi", "pezzo", "coppia", "coppie", "vaschetta", "vaschette", "cf"]:
                 um_finale = "pezzi"
                 if um_clean in ["coppia", "coppie"]:
                     qta *= 2
