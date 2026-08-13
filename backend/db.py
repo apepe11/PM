@@ -25,7 +25,11 @@ def parse_dati_estratti_ia(dati_raw) -> dict:
             return {}
     return {}
 
+# -------------------------------------------------------------------
+# FIX DEFINITIVO: DB CONNECTION HELPER WITH TIMEOUT
+# -------------------------------------------------------------------
 def get_db_connection():
+    """Ritorna la connessione ad aiosqlite con un timeout maggiorato."""
     return aiosqlite.connect(DB_FILE, timeout=30.0)
 
 async def get_data_attiva() -> str:
@@ -65,6 +69,7 @@ async def avanza_data_attiva() -> str:
         
     return nuova_str
 
+# --- FIX TEMPORALE: UTILE DELL'ORARIO REALE DEL MESSAGGIO ---
 async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[str] = None) -> Optional[str]:
     if data_consegna is not None:
         if isinstance(data_consegna, datetime):
@@ -137,7 +142,9 @@ async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_targ
 
     return None
 
+# --- FIX CATALOGO: Usa la nuova struttura compatta e CARICA I PESI FISSI ---
 CATALOGO_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "catalogo.json"))
+PARTICOLARITA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
 PRODOTTI_MAP = {}
 
 if os.path.exists(CATALOGO_FILE):
@@ -163,6 +170,7 @@ if os.path.exists(CATALOGO_FILE):
 
 async def init_db():
     async with get_db_connection() as db:
+        # ABILITIAMO IL WAL PER AZZERARE I BLOCCHI (DATABASE IS LOCKED)
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA synchronous=NORMAL;")
         
@@ -181,12 +189,15 @@ async def init_db():
                 data_ricezione DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # 🔥 NUOVA TABELLA: MEMORIA A LUNGO TERMINE MESSAGGI WHATSAPP 🔥
         await db.execute("""
             CREATE TABLE IF NOT EXISTS messaggi_elaborati (
                 msg_id TEXT PRIMARY KEY,
                 data_elaborazione DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
         await db.execute("""
             CREATE TABLE IF NOT EXISTS broadcast_liste (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,7 +245,11 @@ async def init_db():
         await get_data_attiva()
         print("🗄️ Database Locale SQLite pronto con modalità Anti-Blocco (WAL) attiva.")
 
+# -------------------------------------------------------------
+# 🔥 NUOVE FUNZIONI: CONTROLLO ID MESSAGGIO NEL DATABASE 🔥
+# -------------------------------------------------------------
 async def is_messaggio_elaborato(msg_id: str) -> bool:
+    """Verifica nel DB se questo ID messaggio è già stato processato."""
     if not msg_id:
         return False
     async with get_db_connection() as db:
@@ -243,11 +258,13 @@ async def is_messaggio_elaborato(msg_id: str) -> bool:
         return bool(row)
 
 async def segna_messaggio_elaborato(msg_id: str):
+    """Salva l'ID del messaggio nel DB per evitare rielaborazioni future."""
     if not msg_id:
         return
     async with get_db_connection() as db:
         await db.execute("INSERT OR IGNORE INTO messaggi_elaborati (msg_id) VALUES (?)", (msg_id,))
         await db.commit()
+# -------------------------------------------------------------
 
 async def get_storico_oggi(mittente: str) -> str:
     target_data_consegna = await get_data_attiva()
@@ -507,7 +524,6 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
             if data_filtro and data_consegna != data_filtro:
                 continue
 
-            # NON aggiungiamo più un lotto forzato se l'ordine non è confezionato
             lotto_ord = dati_parsed.get("numero_lotto")
             prodotti = dati_parsed.get("prodotti", [])
             
@@ -526,15 +542,13 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
 
                 if unit_w > 0:
                     p["is_peso_fisso"] = True
-                    # Il peso fisso lo garantiamo sempre
-                    if not p.get("grammatura"):
-                        p["grammatura"] = f"{unit_w:.3f} KG"
                     p["peso_unitario_kg"] = unit_w
                     p["peso_totale_calcolato_kg"] = round(float(p.get("quantita", 0)) * unit_w, 3)
                 else:
                     p["is_peso_fisso"] = False
-                    # Per i pesi variabili NON mettiamo la quantità come grammatura fittizia
-                    # Lasciamo la stringa vuota se l'operatore non l'ha ancora inserita dal tablet!
+                
+                if not p.get("numero_lotto"):
+                    p["numero_lotto"] = lotto_ord
 
             ordini_lista.append({
                 "id": id_ord,

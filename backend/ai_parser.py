@@ -38,37 +38,30 @@ def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_
     h = ora_attuale.hour
     wd = ora_attuale.weekday()
 
-    is_andrea = "3334695153" in client_name or "224257489502407" in client_name or "andrea aliandro" in client_name.lower()
-
-    if is_andrea:
-        data_target = ora_attuale
-        desc = (
-            f"📅 REGOLE TEMPORALI SPECIALI PER ANDREA (TITOLARE):\n"
-            f"Gli ordini inoltrati dal Titolare (se non c'è una data scritta esplicitamente nel messaggio) sono SEMPRE per il GIORNO STESSO (OGGI).\n"
-            f"Data di consegna di default: \"{data_target.strftime('%Y-%m-%d')}\"."
-        )
-        return data_target.strftime('%Y-%m-%d'), desc
+    # Rimosso il blocco if is_andrea che forzava "OGGI".
+    # Ora i messaggi inoltrati dal titolare, se non hanno data specificata nel testo,
+    # seguiranno la normale logica oraria delle 08:00 basata sull'ora di inoltro.
 
     if h < 8:
         data_target = ora_attuale
         desc = (
             f"📅 REGOLA ORARIA DI DEFAULT (< 08:00):\n"
             f"Il messaggio è arrivato alle {ora_attuale.strftime('%H:%M:%S')}.\n"
-            f"Se il cliente NON ha specificato alcun giorno/orario nel testo, imposta la consegna di DEFAULT per OGGI: \"{data_target.strftime('%Y-%m-%d')}\"."
+            f"Se il cliente (o il Titolare che inoltra) NON ha specificato alcun giorno/orario nel testo, imposta la consegna di DEFAULT per OGGI: \"{data_target.strftime('%Y-%m-%d')}\"."
         )
     else:
-        if wd == 5:
+        if wd == 5: # Sabato salta a Lunedì
             data_target = ora_attuale + timedelta(days=2)
-        else:
+        else: # Altri giorni passano a domani
             data_target = ora_attuale + timedelta(days=1)
             
-        if data_target.weekday() == 6:
+        if data_target.weekday() == 6: # Se domani cade di Domenica, sposta a Lunedì
             data_target += timedelta(days=1)
             
         desc = (
             f"📅 REGOLA ORARIA DI DEFAULT (>= 08:00):\n"
             f"Il messaggio è arrivato alle {ora_attuale.strftime('%H:%M:%S')} (DOPO le ore 08:00).\n"
-            f"Se il cliente NON ha specificato alcun giorno/orario nel testo, lo scatto orario imposta la consegna di DEFAULT al prossimo giorno utile: \"{data_target.strftime('%Y-%m-%d')}\"."
+            f"Se il cliente (o il Titolare che inoltra) NON ha specificato alcun giorno/orario nel testo, lo scatto orario imposta la consegna di DEFAULT al prossimo giorno utile: \"{data_target.strftime('%Y-%m-%d')}\"."
         )
 
     return data_target.strftime('%Y-%m-%d'), desc
@@ -187,13 +180,11 @@ class AIParser:
             "ESTRAI il NomeCliente (parola prima della virgola) in 'cliente_reale'. Altrimenti scrivi 'SCONOSCIUTO'."
         ) if is_andrea else ""
 
-        # --- FIX: Generazione Dinamica del Calendario ---
         giorni_it = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
         oggi_nome = giorni_it[message_timestamp.weekday()]
         msg_date_str = message_timestamp.strftime('%Y-%m-%d')
         msg_time_str = message_timestamp.strftime('%H:%M:%S')
         
-        # Mappa esatta dei prossimi 7 giorni per eliminare le allucinazioni
         cal_dopo = []
         for i in range(1, 8):
             d = message_timestamp + timedelta(days=i)

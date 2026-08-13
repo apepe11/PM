@@ -145,18 +145,28 @@ def genera_pdf_produzione_totale(data_produzione: str, lista_produzione: list) -
         [
             Paragraph("CODICE", header_cell_style),
             Paragraph("PRODOTTO DA PRODURRE", header_cell_style),
-            Paragraph("TOTALE KG", header_cell_style),
+            Paragraph("QUANTITÀ TOT.", header_cell_style),
             Paragraph("ORDINI", header_cell_style)
         ]
     ]
 
     for prod in lista_produzione:
-        tot_kg = _safe_float(prod.get("quantita_totale", prod.get("totale_kg", 0)))
+        tot_qta = _safe_float(prod.get("quantita_totale", prod.get("totale_kg", 0)))
         n_ordini = _safe_float(prod.get("numero_ordini", prod.get("totale_pezzi", 0)))
+        
+        # Recupera l'unità di misura reale
+        um = str(prod.get("unita_di_misura", "KG")).strip().upper()
+        
+        # Rimuove i decimali se si tratta di pezzi/unità intere
+        if um in ["PEZZI", "PZ", "COPPIA", "COPPIE"]:
+            qta_str = f"<b>{int(tot_qta)} {um}</b>"
+        else:
+            qta_str = f"<b>{tot_qta:.2f} {um}</b>"
+
         data_table.append([
             Paragraph(_safe_text(prod.get("codice_articolo", prod.get("codice", ""))), cell_style),
             Paragraph(_safe_text(prod.get("nome_prodotto", prod.get("nome", ""))), cell_style),
-            Paragraph(f"<b>{tot_kg:.2f} KG</b>", cell_style),
+            Paragraph(qta_str, cell_style),
             Paragraph(f"<b>{n_ordini:.0f}</b>", cell_style)
         ])
 
@@ -259,7 +269,6 @@ def genera_pdf_singolo_ordine(ordine: dict) -> bytes:
         story.append(Paragraph(f"<b>Note Ordine/Resi:</b> {_safe_text(ordine.get('note_ordine'))}", sub_style))
         story.append(Spacer(1, 0.2*cm))
 
-    # FIX TIPO PYLANCE
     testo_orig = ordine.get("testo_originale") or ""
     if testo_orig and "Inserimento Manuale" not in testo_orig:
         clean_msg = _clean_original_text(testo_orig)
@@ -473,7 +482,6 @@ def genera_pdf_ordini_generale(data_str: str, ordini: list) -> bytes:
     for o in ordini:
         prods_str = "<br/>".join([f"• {_safe_text(p.get('nome_articolo') or p.get('codice_articolo'))}: <b>{p.get('quantita')} {_safe_text(p.get('unita_di_misura'))}</b>" for p in o.get('prodotti', [])])
         
-        # FIX TIPO PYLANCE
         testo_orig = o.get("testo_originale") or ""
         if testo_orig and "Inserimento Manuale" not in testo_orig:
             clean_msg = _clean_original_text(testo_orig)
