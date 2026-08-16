@@ -26,3 +26,6 @@ setup.bat
 setup.sh
 
 reports/
+dist/
+build/
+*.spec.bak

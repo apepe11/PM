@@ -13,7 +13,9 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 
-LOGO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "images", "logo.png"))
+from backend.paths import get_static_path
+
+LOGO_PATH = get_static_path(os.path.join("images", "logo.png"))
 
 def _clean_original_text(text: Optional[str]) -> str:
     """Ripulisce il testo originale da tag tecnici per renderlo leggibile."""

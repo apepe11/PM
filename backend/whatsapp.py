@@ -9,6 +9,14 @@ from typing import Optional
 
 from backend.db import get_storico_oggi, salva_o_aggiorna_ordine, ordine_esiste_in_db, is_messaggio_elaborato, segna_messaggio_elaborato
 from backend.ai_parser import AIParser
+from backend.paths import get_persistent_path, get_static_path
+
+def is_licenza_attiva() -> bool:
+    try:
+        import main
+        return getattr(main, "LICENZA_ATTIVA", True)
+    except Exception:
+        return True
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE EVOLUTION API E SICUREZZA CONCORRENZA
@@ -113,7 +121,9 @@ async def _sincronizza_rubrica_evolution() -> None:
 async def _loop_sincronizzazione_periodica() -> None:
     while True:
         try:
-            if WHATSAPP_STATE.get("stato_connessione") == "CONNESSO":
+            if not is_licenza_attiva():
+                add_whatsapp_log("⛔ Sincronizzazione WhatsApp in pausa: Licenza Software Sospesa.", "WARN")
+            elif WHATSAPP_STATE.get("stato_connessione") == "CONNESSO":
                 await sincronizza_chat_recenti_background()
         except Exception as e:
             add_whatsapp_log(f"⚠️ Errore nel loop periodico: {e}", "WARN")
@@ -205,23 +215,7 @@ def _normalizza_telefono(numero: str) -> str:
 _RUBRICA_CACHE_PATH: Optional[str] = None
 
 def _trova_percorso_rubrica() -> Optional[str]:
-    global _RUBRICA_CACHE_PATH
-    if _RUBRICA_CACHE_PATH and os.path.exists(_RUBRICA_CACHE_PATH):
-        return _RUBRICA_CACHE_PATH
-
-    qui = os.path.dirname(os.path.abspath(__file__))
-    candidati = [
-        os.path.join(qui, "..", "catalogo", "particolarita_clienti.json"),
-        os.path.join(qui, "catalogo", "particolarita_clienti.json"),
-        os.path.join(qui, "..", "..", "catalogo", "particolarita_clienti.json"),
-        os.path.join(os.getcwd(), "catalogo", "particolarita_clienti.json"),
-    ]
-    for c in candidati:
-        c_abs = os.path.abspath(c)
-        if os.path.exists(c_abs):
-            _RUBRICA_CACHE_PATH = c_abs
-            return c_abs
-    return None
+    return get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
 
 def _trova_nome_in_rubrica_locale(phone_number: str) -> str:
     part_path = _trova_percorso_rubrica()

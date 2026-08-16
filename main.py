@@ -1,13 +1,21 @@
 import asyncio
 import os
 import json
+import httpx
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response, FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
+
+from backend.paths import (
+    get_bundle_dir,
+    get_data_dir,
+    get_static_path,
+    get_persistent_path
+)
 
 from backend.db import (
     init_db, 
@@ -56,11 +64,65 @@ from backend.whatsapp import (
     get_whatsapp_status, 
     reset_whatsapp_banco, 
     forzare_scansione_chat, 
-    elabora_webhook_evolution
+    elabora_webhook_evolution,
+    avvia_loop_sincronizzazione_periodica
 )
+
+# ---------------------------------------------------------
+# 🔒 SISTEMA DI CONTROLLO LICENZA REMOTA (CALL-HOME KILL-SWITCH)
+# ---------------------------------------------------------
+URL_LICENZA = os.environ.get(
+    "URL_LICENZA",
+    "https://gist.githubusercontent.com/apepe11/f5e69fe69059b4df045d24de143d80c4/raw"
+)
+LICENZA_ATTIVA = True
+LICENZA_DETTAGLI = {
+    "status": "active",
+    "ultimo_controllo": None,
+    "errore": None
+}
+
+async def verifica_licenza_remota() -> bool:
+    """Interroga il server/Gist remoto per validare lo stato della licenza SaaS."""
+    global LICENZA_ATTIVA, LICENZA_DETTAGLI
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(URL_LICENZA)
+            if resp.status_code == 200:
+                dati = resp.json()
+                stato = str(dati.get("status", "")).lower().strip()
+                is_active = dati.get("active", True) if "active" in dati else (stato == "active")
+                
+                if stato in ["suspended", "sospesa", "revoked", "inactive", "scaduta", "disattivata"] or not is_active:
+                    LICENZA_ATTIVA = False
+                    print("⚠️ [KILL-SWITCH] ATTENZIONE: La licenza remota risulta SOSPESA. Il gestionale è stato bloccato.")
+                else:
+                    LICENZA_ATTIVA = True
+                    print("🟢 [LICENZA] Controllo remoto superato con successo: Licenza ATTIVA.")
+                
+                LICENZA_DETTAGLI["status"] = "active" if LICENZA_ATTIVA else "suspended"
+                LICENZA_DETTAGLI["ultimo_controllo"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                LICENZA_DETTAGLI["errore"] = None
+                return LICENZA_ATTIVA
+            else:
+                print(f"⚠️ [LICENZA] Risposta server anomala (HTTP {resp.status_code}). Mantenimento stato precedente.")
+    except Exception as e:
+        print(f"⚠️ [LICENZA] Impossibile contattare il server licenze: {e}. Mantenimento stato precedente.")
+        LICENZA_DETTAGLI["ultimo_controllo"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        LICENZA_DETTAGLI["errore"] = str(e)
+    return LICENZA_ATTIVA
+
+async def controllo_licenza_periodico():
+    """Controlla la licenza all'avvio e poi ogni 5 minuti in background."""
+    intervallo_secondi = int(os.environ.get("INTERVALLO_CONTROLLO_LICENZA", 300))  # 5 minuti di default
+    await verifica_licenza_remota()
+    while True:
+        await asyncio.sleep(intervallo_secondi)
+        await verifica_licenza_remota()
 
 app = FastAPI(title="Petruzzi Manager - Dashboard API")
 
+# Middleware CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -68,6 +130,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 🛑 Middleware Blocco Licenza Sospesa
+@app.middleware("http")
+async def licenza_check_middleware(request: Request, call_next):
+    percorso = request.url.path
+    if not LICENZA_ATTIVA:
+        # Permette SOLO /api/status, /api/licenza/status e /api/licenza/check
+        if percorso not in ["/api/status", "/api/licenza/status", "/api/licenza/check"]:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "status": "error",
+                    "code": "LICENSE_SUSPENDED",
+                    "message": "Licenza Software Sospesa. Accesso bloccato. Contattare l'amministratore per rinnovare la licenza.",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            )
+    response = await call_next(request)
+    return response
 
 class ProdottoItem(BaseModel):
     codice_articolo: str
@@ -89,14 +170,27 @@ class OrdineUpdate(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     await init_db()
+    asyncio.create_task(controllo_licenza_periodico())
+    avvia_loop_sincronizzazione_periodica()
     asyncio.create_task(avvia_whatsapp())
 
 @app.get("/api/status")
 def status():
     return {
-        "status": "Motore Petruzzi Attivo",
+        "status": "ok" if LICENZA_ATTIVA else "suspended",
+        "licenza_attiva": LICENZA_ATTIVA,
+        "dettagli_licenza": LICENZA_DETTAGLI,
         "database": "SQLite Locale",
-        "ai": "Groq API (Llama 3.3)"
+        "ai": "Groq API (Llama 3.3)",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+@app.post("/api/licenza/check")
+async def force_license_check():
+    attiva = await verifica_licenza_remota()
+    return {
+        "licenza_attiva": attiva,
+        "dettagli": LICENZA_DETTAGLI
     }
 
 @app.get("/api/data-attiva")
@@ -274,8 +368,7 @@ async def get_stats(periodo_tipo: str = Query("mensile"), periodo_valore: Option
 
 @app.get("/api/prodotti")
 async def list_prodotti():
-    # FIX: Puntamento corretto al nuovo file "catalogo.json"
-    catalog_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "catalogo", "catalogo.json"))
+    catalog_path = get_static_path(os.path.join("catalogo", "catalogo.json"))
     if os.path.exists(catalog_path):
         with open(catalog_path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -283,7 +376,7 @@ async def list_prodotti():
 
 def salva_e_apri_pdf_temp(pdf_bytes: bytes, filename: str):
     try:
-        reports_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "reports"))
+        reports_dir = get_persistent_path("reports")
         os.makedirs(reports_dir, exist_ok=True)
         filepath = os.path.join(reports_dir, filename)
         with open(filepath, "wb") as f:
@@ -377,7 +470,7 @@ async def download_pdf_ordini_confezionati_banco(data: Optional[str] = Query(Non
     )
 
 def _get_particolarita_path():
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "catalogo", "particolarita_clienti.json"))
+    return get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
 
 def _carica_particolarita_json() -> list:
     path = _get_particolarita_path()
@@ -544,8 +637,8 @@ async def get_admin_overview(token: Optional[str] = Query(None), data: Optional[
 @app.get("/tablet")
 @app.get("/tablet.html")
 async def serve_tablet_route():
-    tablet_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend", "dist", "tablet.html"))
-    fallback_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend", "dist", "index.html"))
+    tablet_dist = get_static_path(os.path.join("frontend", "dist", "tablet.html"))
+    fallback_dist = get_static_path(os.path.join("frontend", "dist", "index.html"))
     if os.path.exists(tablet_dist):
         return FileResponse(tablet_dist)
     elif os.path.exists(fallback_dist):
@@ -556,18 +649,25 @@ async def serve_tablet_route():
 @app.get("/titolare.html")
 @app.get("/admin")
 async def serve_titolare_route():
-    titolare_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend", "dist", "titolare.html"))
-    fallback_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend", "dist", "index.html"))
+    titolare_dist = get_static_path(os.path.join("frontend", "dist", "titolare.html"))
+    fallback_dist = get_static_path(os.path.join("frontend", "dist", "index.html"))
     if os.path.exists(titolare_dist):
         return FileResponse(titolare_dist)
     elif os.path.exists(fallback_dist):
         return FileResponse(fallback_dist)
     return {"status": "ok", "message": "Modulo Titolare in caricamento"}
 
-images_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "images"))
+images_dir = get_static_path("images")
 if os.path.exists(images_dir):
     app.mount("/images", StaticFiles(directory=images_dir), name="images")
 
-frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend", "dist"))
+frontend_dist = get_static_path(os.path.join("frontend", "dist"))
 if os.path.exists(frontend_dist):
     app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+
+if __name__ == "__main__":
+    import uvicorn
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 Avvio Caseificio Petruzzi Manager su http://localhost:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="info")

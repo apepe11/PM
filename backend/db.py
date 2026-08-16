@@ -6,7 +6,9 @@ import aiosqlite
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-DB_FILE = "petruzzi_ordini.db"
+from backend.paths import get_persistent_path, get_static_path
+
+DB_FILE = get_persistent_path("petruzzi_ordini.db")
 
 
 def parse_dati_estratti_ia(dati_raw) -> dict:
@@ -138,8 +140,8 @@ async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_targ
 
     return None
 
-CATALOGO_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "catalogo.json"))
-PARTICOLARITA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
+CATALOGO_FILE = get_static_path(os.path.join("catalogo", "catalogo.json"))
+PARTICOLARITA_FILE = get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
 PRODOTTI_MAP = {}
 
 if os.path.exists(CATALOGO_FILE):
@@ -994,7 +996,7 @@ async def get_filoni_per_cliente(data_target: Optional[str] = None):
 
 async def get_lista_clienti_registrati():
     clienti_set = set()
-    part_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "catalogo", "particolarita_clienti.json"))
+    part_path = PARTICOLARITA_FILE
     if os.path.exists(part_path):
         try:
             with open(part_path, 'r', encoding='utf-8') as f:

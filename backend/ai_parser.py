@@ -62,12 +62,14 @@ def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_
 
     return data_target.strftime('%Y-%m-%d'), desc
 
+from backend.paths import get_persistent_path, get_static_path
+
 class AIParser:
     def __init__(self, base_dir="catalogo"):
         self.base_dir = base_dir
         
-        catalogo_path = os.path.join(self.base_dir, "catalogo.json")
-        particolarita_path = os.path.join(self.base_dir, "particolarita_clienti.json")
+        catalogo_path = get_static_path(os.path.join("catalogo", "catalogo.json"))
+        particolarita_path = get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
         
         self.catalog = self._load_json(catalogo_path, [])
         
@@ -83,7 +85,7 @@ class AIParser:
         self.current_model = GROQ_MODEL
 
     def reload_client_rules(self):
-        particolarita_path = os.path.join(self.base_dir, "particolarita_clienti.json")
+        particolarita_path = get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
         self.client_rules = self._load_json(particolarita_path, [])
         logging.info(f"🔄 Regole clienti ricaricate in memoria ({len(self.client_rules)} clienti).")
 
