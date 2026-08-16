@@ -138,7 +138,9 @@ export default function ProduzioneGiornaliera({ produzione, selectedDate, setSel
                       {/* Quantità Totale */}
                       <td className="py-4 px-6 text-right">
                         <span className={`text-2xl font-black ${isHeavy ? 'text-petruzzi-800' : 'text-petruzzi-950'}`}>
-                          {item.quantita_totale.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                          {item.unita_di_misura?.toLowerCase() === 'pezzi' || item.unita_di_misura?.toLowerCase() === 'pz'
+                            ? Math.round(item.quantita_totale)
+                            : item.quantita_totale.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                         </span>
                       </td>
 

@@ -91,6 +91,7 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
                 >
                   {/* GRUPPO 1: Gestione Principale */}
                   <option value="produzione" className="bg-white text-petruzzi-950 font-bold">🏭 Produzione Casaro</option>
+                  
                   <option value="ordini" className="bg-white text-petruzzi-950 font-bold">📦 Ordini Clienti</option>
                   <option value="nuovo-ordine" className="bg-petruzzi-100 text-petruzzi-950 font-black">➕ Creazione Nuovo Ordine</option>
                   <option value="confermati" className="bg-white text-emerald-800 font-bold">✅ Ordini Confermati</option>
@@ -98,14 +99,15 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
                   <option disabled className="bg-gray-100 text-gray-400 text-center font-normal">──────────</option>
 
                   {/* GRUPPO 2: Viste Specifiche */}
-                  
-                  <option value="filoni" className="bg-white text-petruzzi-950 font-bold">🍕 Filoni Pizzeria</option>
+                  <option value="produzione-sole" className="bg-amber-50 text-amber-950 font-black">☀️ Produzione Totale Sole 365</option>
                   <option value="sole" className="bg-amber-50 text-amber-900 font-bold">☀️ Ordini Gruppo Sole 365</option>
+                  <option value="filoni" className="bg-white text-petruzzi-950 font-bold">🍕 Filoni Pizzeria</option>
                   
                   {/* SPAZIO VUOTO NON SELEZIONABILE */}
                   <option disabled className="bg-gray-100 text-gray-400 text-center font-normal">──────────</option>
 
                   {/* GRUPPO 3: Strumenti e Amministrazione */}
+                  <option value="anagrafica" className="bg-white text-petruzzi-950 font-bold">👥 Rubrica & Particolarità Clienti</option>
                   <option value="broadcast" className="bg-white text-petruzzi-900 font-bold">📢 Broadcast & Notifiche</option>
                   <option value="statistiche" className="bg-white text-petruzzi-950 font-bold">📊 Statistiche & Controllo</option>
                   <option value="connessione" className="bg-white text-emerald-800 font-bold">📲 Connessione Banco WhatsApp</option>

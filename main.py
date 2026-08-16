@@ -16,6 +16,9 @@ from backend.db import (
     aggiorna_ordine, 
     elimina_ordine, 
     get_produzione_aggregata, 
+    get_produzione_aggregata_sole,
+    get_ordini_sole,
+    is_ordine_sole,
     get_statistiche,
     get_filoni_per_cliente,
     get_lista_clienti_registrati,
@@ -39,10 +42,12 @@ from backend.db import (
 
 from backend.pdf_generator import (
     genera_pdf_produzione_totale, 
+    genera_pdf_produzione_sole_totale,
     genera_pdf_singolo_ordine, 
     genera_pdf_filoni,
     genera_pdf_ordini_confezionati_banco,
     genera_pdf_ordini_generale,
+    genera_pdf_sole,
     apri_file_nativo_os
 )
 
@@ -252,6 +257,17 @@ async def remove_ordine(id_ordine: int):
 async def list_produzione(data: Optional[str] = Query(None)):
     return await get_produzione_aggregata(data)  # type: ignore
 
+@app.get("/api/produzione-sole")
+@app.get("/api/produzione/sole")
+async def list_produzione_sole(data: Optional[str] = Query(None)):
+    target_data = data or await get_data_attiva()
+    return await get_produzione_aggregata_sole(target_data)  # type: ignore
+
+@app.get("/api/ordini-sole")
+async def list_ordini_sole(data: Optional[str] = Query(None), scomponi_pezzi: bool = Query(False)):
+    target_data = data or await get_data_attiva()
+    return await get_ordini_sole(target_data, scomponi_pezzi=scomponi_pezzi)  # type: ignore
+
 @app.get("/api/statistiche")
 async def get_stats(periodo_tipo: str = Query("mensile"), periodo_valore: Optional[str] = Query(None)):
     return await get_statistiche(periodo_tipo, periodo_valore)
@@ -286,6 +302,19 @@ async def download_pdf_produzione(data: Optional[str] = Query(None)):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=produzione_petruzzi_{target_data}.pdf"}
+    )
+
+@app.get("/api/pdf/produzione-sole")
+@app.get("/api/pdf/produzione/sole")
+async def download_pdf_produzione_sole(data: Optional[str] = Query(None)):
+    target_data = data or await get_data_attiva()
+    lista_prod = await get_produzione_aggregata_sole(target_data)  # type: ignore
+    pdf_bytes = genera_pdf_produzione_sole_totale(target_data, lista_prod)
+    salva_e_apri_pdf_temp(pdf_bytes, f"produzione_sole_{target_data}.pdf")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=produzione_sole_{target_data}.pdf"}
     )
 
 @app.get("/api/pdf/ordine/{id_ordine}")
@@ -347,30 +376,87 @@ async def download_pdf_ordini_confezionati_banco(data: Optional[str] = Query(Non
         headers={"Content-Disposition": f"inline; filename=riepilogo_banco_confezionati_{target_data}.pdf"}
     )
 
+def _get_particolarita_path():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "catalogo", "particolarita_clienti.json"))
+
+def _carica_particolarita_json() -> list:
+    path = _get_particolarita_path()
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+        except Exception as e:
+            print(f"⚠️ Errore lettura particolarità: {e}")
+    return []
+
+def _salva_particolarita_json(data: list):
+    path = _get_particolarita_path()
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    try:
+        from backend.whatsapp import ai_parser as whatsapp_ai_parser
+        if hasattr(whatsapp_ai_parser, 'reload_client_rules'):
+            whatsapp_ai_parser.reload_client_rules()
+    except Exception as e:
+        print(f"⚠️ Errore reload regole IA: {e}")
+
 @app.get("/api/clienti")
 async def list_clienti():
     return await get_lista_clienti_registrati()  # type: ignore
 
-# --- NUOVA ROUTE: Aggiungi Cliente al JSON ---
+@app.get("/api/particolarita-clienti")
+async def get_particolarita_clienti():
+    """Restituisce l'elenco completo dei clienti e particolarità dal file JSON."""
+    clienti = _carica_particolarita_json()
+    # Aggiunge un identificatore indice univoco per ciascun cliente
+    result = []
+    for idx, c in enumerate(clienti):
+        item = dict(c)
+        item["index"] = idx
+        result.append(item)
+    return result
+
+@app.post("/api/particolarita-clienti")
 @app.post("/api/clienti")
-async def add_cliente(payload: dict = Body(...)):
-    clienti_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "catalogo", "particolarita_clienti.json"))
+async def add_particolarita_cliente(payload: dict = Body(...)):
+    """Aggiunge un nuovo cliente o regola nel file JSON."""
+    clienti = _carica_particolarita_json()
     
-    try:
-        with open(clienti_path, 'r', encoding='utf-8') as f:
-            clienti = json.load(f)
-    except FileNotFoundError:
-        clienti = []
-        
-    # Pulisce i campi vuoti passati dal frontend
-    cliente_pulito = {k: v for k, v in payload.items() if v}
+    # Pulisce i campi nulli/vuoti
+    cliente_pulito = {k: v.strip() if isinstance(v, str) else v for k, v in payload.items() if v is not None and v != "" and k != "index"}
+    if not cliente_pulito.get("n"):
+        raise HTTPException(status_code=400, detail="Il nome del cliente è obbligatorio.")
+    
     clienti.append(cliente_pulito)
+    _salva_particolarita_json(clienti)
+    return {"status": "success", "message": "Cliente aggiunto con successo.", "total": len(clienti)}
+
+@app.put("/api/particolarita-clienti/{index}")
+async def update_particolarita_cliente(index: int, payload: dict = Body(...)):
+    """Modifica direttamente il cliente alla posizione specificata nel file JSON."""
+    clienti = _carica_particolarita_json()
+    if index < 0 or index >= len(clienti):
+        raise HTTPException(status_code=404, detail="Cliente non trovato all'indice specificato.")
     
-    # Salva di nuovo nel file JSON preservando la codifica
-    with open(clienti_path, 'w', encoding='utf-8') as f:
-        json.dump(clienti, f, indent=2, ensure_ascii=False)
+    cliente_pulito = {k: v.strip() if isinstance(v, str) else v for k, v in payload.items() if v is not None and v != "" and k != "index"}
+    if not cliente_pulito.get("n"):
+        raise HTTPException(status_code=400, detail="Il nome del cliente è obbligatorio.")
         
-    return {"status": "success", "message": "Cliente aggiunto al file JSON."}
+    clienti[index] = cliente_pulito
+    _salva_particolarita_json(clienti)
+    return {"status": "success", "message": "Cliente aggiornato con successo."}
+
+@app.delete("/api/particolarita-clienti/{index}")
+async def delete_particolarita_cliente(index: int):
+    """Elimina il cliente alla posizione specificata dal file JSON."""
+    clienti = _carica_particolarita_json()
+    if index < 0 or index >= len(clienti):
+        raise HTTPException(status_code=404, detail="Cliente non trovato all'indice specificato.")
+    
+    rimosso = clienti.pop(index)
+    _salva_particolarita_json(clienti)
+    return {"status": "success", "message": f"Cliente '{rimosso.get('n', '')}' rimosso dal file JSON.", "total": len(clienti)}
 
 # --- MODIFICA FONDAMENTALE: L'API prende una lista di prodotti pesati ---
 @app.put("/api/ordini/{id_ordine}/confezione")
@@ -409,26 +495,11 @@ async def download_db_backup(token: Optional[str] = Query(None)):
 @app.get("/api/pdf/sole")
 async def download_pdf_sole(data: Optional[str] = Query(None)):
     target_date = data or await get_data_attiva()
-    ordini = await get_tutti_ordini(target_date) 
-    
-    # 📱 Stessi numeri di telefono del frontend
-    numeri_sole_365 = ['3284344912', '181208998756424']
-    ordini_sole = []
-    
-    for o in ordini:
-        if o.get('is_cancelled') or o.get('stato_ordine') == 'ANNULLATO':
-            continue
-        
-        mittente_str = str(o.get('mittente', '')).lower()
-        is_sole_by_name = 'sole' in mittente_str or '365' in mittente_str
-        is_sole_by_phone = any(numero in mittente_str for numero in numeri_sole_365)
-        
-        if is_sole_by_name or is_sole_by_phone:
-            ordini_sole.append(o)
+    ordini_sole = await get_ordini_sole(target_date)
             
-    # Usa il template PDF Generale passandogli solo i clienti "Sole"
-    pdf_bytes = genera_pdf_ordini_generale(target_date, ordini_sole)
-    filename = f"ordini_sole_365_{target_date}.pdf"
+    # Usa il template PDF per i clienti "Sole 365"
+    pdf_bytes = genera_pdf_sole(target_date, ordini_sole)
+    filename = f"scheda_ordini_sole_365_{target_date}.pdf"
     salva_e_apri_pdf_temp(pdf_bytes, filename)
     
     return Response(

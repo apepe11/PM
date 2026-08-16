@@ -10,7 +10,9 @@ import BroadcastManager from './components/BroadcastManager';
 import AnalisiStatistica from './components/AnalisiStatistica';
 import ConnessioneBanco from './components/ConnessioneBanco';
 import OrdiniModal from './components/OrdiniModal';
-import OrdiniSole from './components/OrdiniSole'; // NUOVO IMPORT
+import OrdiniSole from './components/OrdiniSole';
+import ProduzioneSole from './components/ProduzioneSole'; // NUOVA PRODUZIONE SOLE 365
+import AnagraficaClienti from './components/AnagraficaClienti'; // NUOVA RUBRICA & PARTICOLARITÀ
 import { Printer, CheckCircle, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -41,6 +43,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(getDeliveryDateDefault());
   const [ordini, setOrdini] = useState([]);
   const [produzione, setProduzione] = useState([]);
+  const [produzioneSole, setProduzioneSole] = useState([]);
   const [statistiche, setStatistiche] = useState(null);
   const [prodottiCatalogo, setProdottiCatalogo] = useState([]);
 
@@ -65,6 +68,12 @@ export default function App() {
       if (resProd.ok) {
         const dataProd = await resProd.json();
         setProduzione(dataProd);
+      }
+
+      const resProdSole = await fetch(`${API_BASE}/produzione-sole?data=${selectedDate}`);
+      if (resProdSole.ok) {
+        const dataProdSole = await resProdSole.json();
+        setProduzioneSole(dataProdSole);
       }
 
       const resStats = await fetch(`${API_BASE}/statistiche`);
@@ -248,6 +257,15 @@ export default function App() {
           />
         )}
 
+        {/* NUOVA SEZIONE DISTINTA PRODUZIONE TOTALE SOLE 365 */}
+        {activeTab === 'produzione-sole' && (
+          <ProduzioneSole
+            produzioneSole={produzioneSole}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+          />
+        )}
+
         {activeTab === 'filoni' && (
           <FiloniPizzeria
             selectedDate={selectedDate}
@@ -290,6 +308,7 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'anagrafica' && <AnagraficaClienti showToast={showToast} />}
         {activeTab === 'tablet' && <PostazioneTablet />}
         {activeTab === 'admin' && <AdminRemoteHub />}
         {activeTab === 'broadcast' && <BroadcastManager />}

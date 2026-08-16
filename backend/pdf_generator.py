@@ -629,3 +629,136 @@ def genera_pdf_sole(data_str: str, ordini_sole: list) -> bytes:
 
     doc.build(story)
     return buffer.getvalue()
+
+def genera_pdf_produzione_sole_totale(data_produzione: str, lista_produzione: list) -> bytes:
+    """Genera la distinta A4 PDF per la produzione totale aggregata riservata agli ordini Sole 365."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+
+    story = []
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor('#4e2a1e'),
+        alignment=0
+    )
+    subtitle_style = ParagraphStyle(
+        'DocSubTitle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor('#b45309')
+    )
+    cell_style = ParagraphStyle(
+        'CellText',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor('#1c1917')
+    )
+    header_cell_style = ParagraphStyle(
+        'HeaderCellText',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor('#ffffff')
+    )
+
+    data_formatted = formatta_data_it(data_produzione)
+
+    if os.path.exists(LOGO_PATH):
+        img = Image(LOGO_PATH, width=2.5*cm, height=2.5*cm)
+        img.hAlign = 'LEFT'
+        
+        header_text = [
+            Paragraph("CASEIFICIO PETRUZZI DAL 1923", title_style),
+            Spacer(1, 0.1*cm),
+            Paragraph(f"DISTINTA DI PRODUZIONE SOLE 365 — GIORNATA: {data_formatted}", subtitle_style),
+            Paragraph(f"Generato il: {datetime.now().strftime('%d/%m/%Y alle %H:%M')}", styles['Italic'])
+        ]
+        
+        header_table = Table([[img, header_text]], colWidths=[3.0*cm, 15.0*cm])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (0,0), 'LEFT'),
+        ]))
+        story.append(header_table)
+    else:
+        story.append(Paragraph("CASEIFICIO PETRUZZI DAL 1923", title_style))
+        story.append(Paragraph(f"DISTINTA DI PRODUZIONE SOLE 365 — GIORNATA: {data_formatted}", subtitle_style))
+
+    story.append(Spacer(1, 0.5*cm))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#d97706'), spaceBefore=1, spaceAfter=15))
+
+    data_table = [
+        [
+            Paragraph("CODICE", header_cell_style),
+            Paragraph("PRODOTTO DA PRODURRE (GRUPPO SOLE 365)", header_cell_style),
+            Paragraph("QUANTITÀ TOT.", header_cell_style),
+            Paragraph("PUNTI VENDITA / ORDINI", header_cell_style)
+        ]
+    ]
+
+    for prod in lista_produzione:
+        tot_qta = _safe_float(prod.get("quantita_totale", prod.get("totale_kg", 0)))
+        n_ordini = _safe_float(prod.get("numero_ordini", 0))
+        clienti_list = prod.get("clienti", [])
+        
+        clienti_str = ""
+        if clienti_list:
+            clienti_str = f"<br/><font size='8' color='#78350f'>({', '.join(clienti_list[:3])}{'...' if len(clienti_list)>3 else ''})</font>"
+        
+        um = str(prod.get("unita_di_misura", "KG")).strip().upper()
+        
+        if um in ["PEZZI", "PZ", "COPPIA", "COPPIE"]:
+            qta_str = f"<b>{int(tot_qta)} {um}</b>"
+        else:
+            qta_str = f"<b>{tot_qta:.2f} {um}</b>"
+
+        data_table.append([
+            Paragraph(_safe_text(prod.get("codice_articolo", "")), cell_style),
+            Paragraph(_safe_text(prod.get("nome_prodotto", "")), cell_style),
+            Paragraph(qta_str, cell_style),
+            Paragraph(f"<b>{n_ordini:.0f} ord.</b>{clienti_str}", cell_style)
+        ])
+
+    if len(data_table) == 1:
+        data_table.append([
+            Paragraph("-", cell_style),
+            Paragraph("Nessun articolo da produrre per il Gruppo Sole 365 in questa data.", cell_style),
+            Paragraph("-", cell_style),
+            Paragraph("-", cell_style)
+        ])
+
+    table = Table(data_table, colWidths=[3.2*cm, 7.8*cm, 3.2*cm, 3.8*cm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#92400e')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+        ('TOPPADDING', (0,0), (-1,0), 8),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#fffbeb')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#fde68a')),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.HexColor('#ffffff'), colors.HexColor('#fef3c7')]),
+        ('TOPPADDING', (0,1), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,1), (-1,-1), 6),
+    ]))
+
+    story.append(table)
+    doc.build(story)
+    return buffer.getvalue()

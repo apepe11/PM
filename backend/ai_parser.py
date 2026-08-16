@@ -82,6 +82,11 @@ class AIParser:
         self.client_groq = AsyncGroq(api_key=GROQ_API_KEY, max_retries=0)
         self.current_model = GROQ_MODEL
 
+    def reload_client_rules(self):
+        particolarita_path = os.path.join(self.base_dir, "particolarita_clienti.json")
+        self.client_rules = self._load_json(particolarita_path, [])
+        logging.info(f"🔄 Regole clienti ricaricate in memoria ({len(self.client_rules)} clienti).")
+
     def _load_json(self, file_path: str, default_value: Any) -> Any:
         if os.path.exists(file_path):
             try:
@@ -202,6 +207,7 @@ class AIParser:
         MAPPATURA PRODOTTI AMBIGUI (MASSIMA ATTENZIONE):
         1. SCAMORZE: Se il cliente chiede "scamorze" o "scamorza" (bianche, affumicate, ecc.) senza specificare le parole "confezionate", "conf" o "imbustate", DEVI usare ESCLUSIVAMENTE la versione SFUSA (es. SCABIPE, SCAAFPE). Usa la versione "Conf." SOLO se c'è scritto esplicitamente "confezionate" o "conf".
         2. RICOTTA: Se il cliente chiede "ricotta" o "ricotte" senza specificare il peso, DEVI usare SEMPRE di default la Ricotta classica da 500g (codice RICOTPE). Usa la Ricotta da 300g (RIC300) o le Ricottine (RICPIC) SOLO SE scrive esplicitamente "300g", "piccole" o "ricottina".
+        3. BURRATA (qualunque tipo: classica, tartufo, pistacchio, ecc.): La burrata è sempre conteggiata A PEZZI (unita_di_misura: "pezzi"). Se il cliente ordina ad es. "2 burrate", "1 burrata pistacchio" o "3 vaschette", la quantità è il numero di pezzi e l'unita_di_misura DEVE ESSERE "pezzi". Se indica il peso (es. "500g di burrata" o "1kg"), convertila sempre nel numero di pezzi corrispondenti (1 pezzo = 250g = 0.25kg, quindi 500g = 2 pezzi, 1kg = 4 pezzi) con unita_di_misura: "pezzi".
 
         MAPPATURA QUANTITÀ E RESI:
         - Usa ESATTAMENTE Codice/Nome. 

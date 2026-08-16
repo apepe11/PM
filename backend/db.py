@@ -650,12 +650,43 @@ async def rielabora_tutti_ordini():
         await db.commit()
         return count
 
+def is_cliente_mulnar(mittente: str) -> bool:
+    """Verifica se il mittente o numero corrisponde a Mulnar."""
+    m = str(mittente or "").lower()
+    m_clean = re.sub(r"\D", "", m)
+    if "mulnar" in m:
+        return True
+    for num in ["3471461004", "0975203278", "471461004", "975203278"]:
+        if num in m_clean or num in m:
+            return True
+    return False
+
+def is_burrata_articolo(codice: str, nome: str) -> bool:
+    """Verifica se l'articolo è una burrata di qualsiasi tipologia (classica, tartufo, pistacchio, ecc.)."""
+    c = str(codice or "").lower()
+    n = str(nome or "").lower()
+    return "burrat" in c or "burrat" in n or "burat" in c or "burat" in n or "burpist" in c
+
+def get_peso_unitario_articolo(codice: str, nome: str) -> float:
+    cod = str(codice or "").strip()
+    if cod in PRODOTTI_MAP and PRODOTTI_MAP[cod].get("peso_unitario") is not None:
+        try:
+            return float(PRODOTTI_MAP[cod]["peso_unitario"])
+        except Exception:
+            pass
+    w = estrai_peso_unitario_da_nome(nome)
+    if w > 0:
+        return w
+    return 0.25
+
 async def get_produzione_aggregata(data_target: Optional[str] = None):
     ordini = await get_tutti_ordini(data_target)
     totali = {}
 
     for o in ordini:
         if o.get("is_cancelled") or o.get("stato_ordine") == "ANNULLATO":
+            continue
+        if is_cliente_mulnar(o.get("mittente", "")):
             continue
         for p in o.get("prodotti", []):
             cod = str(p.get("codice_articolo", "GENERICO")).strip()
@@ -668,6 +699,19 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
 
             qta = float(p.get("quantita", 0))
             um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()
+
+            # La burrata va SEMPRE calcolata a PEZZI per la produzione
+            if is_burrata_articolo(cod, nome):
+                um = "pezzi"
+                p_um = (p.get("unita_di_misura") or "").lower()
+                if p_um == "kg":
+                    peso_un = get_peso_unitario_articolo(cod, nome)
+                    if peso_un > 0:
+                        qta = round(qta / peso_un)
+                    else:
+                        qta = round(qta / 0.25)
+                else:
+                    qta = round(qta)
 
             if cod not in totali:
                 totali[cod] = {
@@ -682,6 +726,97 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
 
     lista_produzione = sorted(totali.values(), key=lambda x: x["quantita_totale"], reverse=True)
     return lista_produzione
+
+def is_ordine_sole(ordine_or_mittente) -> bool:
+    """Verifica se un ordine o mittente fa parte del circuito Gruppo Sole 365."""
+    if isinstance(ordine_or_mittente, dict):
+        mittente = str(ordine_or_mittente.get("mittente", ""))
+        note = str(ordine_or_mittente.get("note_ordine", ""))
+        testo = str(ordine_or_mittente.get("testo_originale", ""))
+        full_text = f"{mittente} {note} {testo}".lower()
+    else:
+        full_text = str(ordine_or_mittente).lower()
+        mittente = str(ordine_or_mittente)
+
+    if "sole" in full_text or "365" in full_text:
+        return True
+
+    numeri_sole_365 = ['3284344912', '181208998756424', '199325305045099', '177188993269891', '393284344912']
+    if any(num in mittente for num in numeri_sole_365):
+        return True
+
+    if os.path.exists(PARTICOLARITA_FILE):
+        try:
+            with open(PARTICOLARITA_FILE, 'r', encoding='utf-8') as f:
+                clienti = json.load(f)
+                for c in clienti:
+                    nome_c = str(c.get("n", "")).lower()
+                    part_c = str(c.get("p", "")).lower()
+                    tel_c = str(c.get("t", "")).replace("+", "").replace(" ", "")
+                    if ("sole" in nome_c or "365" in nome_c or "sole" in part_c or "365" in part_c):
+                        if nome_c and nome_c in full_text:
+                            return True
+                        if tel_c and tel_c in mittente.replace("+", "").replace(" ", ""):
+                            return True
+        except Exception:
+            pass
+
+    return False
+
+async def get_produzione_aggregata_sole(data_target: Optional[str] = None):
+    """Calcola la distinta di produzione aggregata esclusivamente per gli ordini del Gruppo Sole 365."""
+    ordini = await get_tutti_ordini(data_target)
+    totali = {}
+
+    for o in ordini:
+        if o.get("is_cancelled") or o.get("stato_ordine") == "ANNULLATO":
+            continue
+        if not is_ordine_sole(o):
+            continue
+
+        mittente_nome = o.get("mittente", "").split("(")[0].strip() or "Punto Vendita Sole"
+
+        for p in o.get("prodotti", []):
+            cod = str(p.get("codice_articolo", "GENERICO")).strip()
+            nome = str(p.get("nome_articolo") or PRODOTTI_MAP.get(cod, {}).get("nome") or cod).strip()
+
+            qta = float(p.get("quantita", 0))
+            um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()
+
+            # La burrata va SEMPRE calcolata a PEZZI per la produzione
+            if is_burrata_articolo(cod, nome):
+                um = "pezzi"
+                p_um = (p.get("unita_di_misura") or "").lower()
+                if p_um == "kg":
+                    peso_un = get_peso_unitario_articolo(cod, nome)
+                    if peso_un > 0:
+                        qta = round(qta / peso_un)
+                    else:
+                        qta = round(qta / 0.25)
+                else:
+                    qta = round(qta)
+
+            if cod not in totali:
+                totali[cod] = {
+                    "codice_articolo": cod,
+                    "nome_prodotto": nome,
+                    "quantita_totale": 0.0,
+                    "unita_di_misura": um,
+                    "numero_ordini": 0,
+                    "clienti": []
+                }
+            totali[cod]["quantita_totale"] += qta
+            totali[cod]["numero_ordini"] += 1
+            if mittente_nome not in totali[cod]["clienti"]:
+                totali[cod]["clienti"].append(mittente_nome)
+
+    lista_produzione = sorted(totali.values(), key=lambda x: x["quantita_totale"], reverse=True)
+    return lista_produzione
+
+async def get_ordini_sole(data_target: Optional[str] = None, scomponi_pezzi: bool = False):
+    """Restituisce la lista degli ordini appartenenti al Gruppo Sole 365."""
+    ordini = await get_tutti_ordini(data_target, scomponi_pezzi=scomponi_pezzi)
+    return [o for o in ordini if is_ordine_sole(o) and not o.get("is_cancelled") and o.get("stato_ordine") != "ANNULLATO"]
 
 async def get_statistiche(periodo_tipo: str = "mensile", periodo_valore: Optional[str] = None):
     tutti_ordini = await get_tutti_ordini()
@@ -827,16 +962,22 @@ async def get_filoni_per_cliente(data_target: Optional[str] = None):
     clienti_filoni = []
 
     for o in ordini:
+        if o.get("is_cancelled") or o.get("stato_ordine") == "ANNULLATO":
+            continue
+
+        mittente = o.get("mittente", "")
+        is_mulnar = is_cliente_mulnar(mittente)
+
         filoni_cliente = []
         for p in o.get("prodotti", []):
             nome = (p.get("nome_articolo") or p.get("codice_articolo") or "").lower()
             cod = (p.get("codice_articolo") or "").lower()
-            if "filon" in nome or "filon" in cod or "panetto" in nome or "pizza" in nome or "julienne" in nome or "tagju" in cod:
+            if "filon" in nome or "filon" in cod or "panetto" in nome or "pizza" in nome or "julienne" in nome or "tagju" in cod or is_mulnar:
                 filoni_cliente.append(p)
         
         if filoni_cliente:
             tot_kg = sum(float(p.get("quantita", 0)) for p in filoni_cliente if (p.get("unita_di_misura") or "").lower() == "kg")
-            tot_pz = sum(float(p.get("quantita", 0)) for p in filoni_cliente if (p.get("unita_di_misura") or "").lower() in ["pezzi", "pz"])
+            tot_pz = sum(float(p.get("quantita", 0)) for p in filoni_cliente if (p.get("unita_di_misura") or "").lower() in ["pezzi", "pz", "coppia", "coppie"])
             
             clienti_filoni.append({
                 "id_ordine": o.get("id"),
