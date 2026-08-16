@@ -73,7 +73,7 @@ from backend.whatsapp import (
 # ---------------------------------------------------------
 URL_LICENZA = os.environ.get(
     "URL_LICENZA",
-    "https://gist.githubusercontent.com/apepe11/f5e69fe69059b4df045d24de143d80c4/raw"
+    "https://gist.githubusercontent.com/apepe11/2e0a21543f90632b9f0e0ccf2fc14888/raw/mia.json"
 )
 LICENZA_ATTIVA = True
 LICENZA_DETTAGLI = {
