@@ -118,6 +118,42 @@ async def _sincronizza_rubrica_evolution() -> None:
     except Exception as e:
         add_whatsapp_log(f"⚠️ Errore sincronizzazione rubrica: {e}", "WARN")
 
+async def invia_messaggio_whatsapp(destinatario_o_numero: str, testo: str) -> bool:
+    """Invia un messaggio WhatsApp tramite Evolution API."""
+    try:
+        raw = str(destinatario_o_numero or "").strip()
+        num = re.sub(r"\D", "", raw)
+
+        # Se non ha numeri o è troppo corto, cerca per nome nella rubrica Evolution
+        if len(num) < 8:
+            for phone_key, name_val in WHATSAPP_CONTACTS.items():
+                if raw.lower() in name_val.lower() or name_val.lower() in raw.lower():
+                    num = re.sub(r"\D", "", phone_key)
+                    break
+
+        if not num or len(num) < 8:
+            add_whatsapp_log(f"⚠️ Impossibile inviare a '{destinatario_o_numero}': nessun numero valido trovato.", "WARN")
+            return False
+
+        if not num.startswith("39") and len(num) == 10:
+            num = "39" + num
+
+        url = f"{EVOLUTION_URL}/message/sendText/{INSTANCE_NAME}"
+        payload = {
+            "number": num,
+            "text": testo
+        }
+        res = requests.post(url, headers=_req_headers(), json=payload, timeout=15)
+        if res.status_code in [200, 201]:
+            add_whatsapp_log(f"📤 Broadcast inviato a {destinatario_o_numero} ({num})", "SUCCESS")
+            return True
+        else:
+            add_whatsapp_log(f"❌ Errore invio Evolution a {destinatario_o_numero}: {res.text}", "ERROR")
+            return False
+    except Exception as e:
+        add_whatsapp_log(f"❌ Eccezione invio WhatsApp Evolution: {e}", "ERROR")
+        return False
+
 async def _loop_sincronizzazione_periodica() -> None:
     while True:
         try:
@@ -306,13 +342,12 @@ def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
     return []
 
 async def sincronizza_chat_recenti_background() -> None:
-    await asyncio.sleep(3)
     add_whatsapp_log("📥 Avvio sincronizzazione automatica delle chat recenti (ultimi 2 giorni)...", "INFO")
     
     two_days_ago_timestamp = (datetime.now() - timedelta(days=2)).timestamp()
 
     try:
-        res = requests.post(f"{EVOLUTION_URL}/chat/findChats/{INSTANCE_NAME}", json={}, headers=_req_headers(), timeout=10)
+        res = requests.post(f"{EVOLUTION_URL}/chat/findChats/{INSTANCE_NAME}", json={}, headers=_req_headers(), timeout=15)
         if res.status_code != 200:
             return
 
@@ -321,11 +356,11 @@ async def sincronizza_chat_recenti_background() -> None:
         if not chats:
             return
 
-        chat_ids = [c.get("remoteJid") or c.get("id") for c in chats[:30] if c.get("remoteJid") or c.get("id")]
         processed_count = 0
 
-        for remote_jid in chat_ids:
-            if "@g.us" in remote_jid:
+        for c in chats:
+            remote_jid = c.get("remoteJid") or c.get("id")
+            if not remote_jid or "@g.us" in remote_jid:
                 continue
 
             msg_res = requests.post(
@@ -358,8 +393,6 @@ async def sincronizza_chat_recenti_background() -> None:
                         continue 
 
                     msg_id = msg.get("key", {}).get("id", "")
-                    if msg_id and await is_messaggio_elaborato(msg_id):
-                        continue
 
                     testo = ""
                     is_vocal = False
@@ -377,7 +410,9 @@ async def sincronizza_chat_recenti_background() -> None:
                     if not testo and not is_vocal:
                         continue
 
-                    phone_number = remote_jid.split("@")[0]
+                    key = msg.get("key", {})
+                    remote_jid_alt = key.get("remoteJidAlt", "")
+                    phone_number = remote_jid_alt.split("@")[0] if remote_jid_alt else remote_jid.split("@")[0]
                     nome_finale = _trova_nome_in_rubrica_locale(phone_number)
                     
                     if not nome_finale:
@@ -387,19 +422,19 @@ async def sincronizza_chat_recenti_background() -> None:
                         nome_finale = _forza_ricerca_nome_evolution(remote_jid, phone_number)
                         
                     mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
-
                     data_ricezione_custom = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') if timestamp else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                    if not is_vocal and await ordine_esiste_in_db(mittente, testo, None):
+                    # Se l'ordine è già presente nel DB per quel mittente e testo, passa oltre
+                    if await ordine_esiste_in_db(mittente, testo, None):
                         await segna_messaggio_elaborato(msg_id)
                         continue
 
                     await segna_messaggio_elaborato(msg_id)
                     processed_count += 1
 
-                    # ⏳ FRENO A MANO PER GROQ API: Una chiamata ogni 5 secondi, MAX 12 RPM per azzerare gli errori 429
-                    asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom))
-                    await asyncio.sleep(5.0)
+                    add_whatsapp_log(f"📥 [Sync] Elaborazione messaggio di {mittente}: {testo[:50]}", "INFO")
+                    await _processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom)
+                    await asyncio.sleep(1.5)
                 except Exception as msg_err:
                     continue
 
@@ -407,9 +442,13 @@ async def sincronizza_chat_recenti_background() -> None:
         WHATSAPP_STATE["ultima_sincronizzazione_periodica"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 
     except Exception as e:
-        add_whatsapp_log(f"⚠️ Errore durante la sincronizzazione delle chat recenti: {e}", "WARN")
+        add_whatsapp_log(f"⚠️ Errore sincronizzazione storico: {e}", "WARN")
 
 async def elabora_webhook_evolution(payload: dict) -> None:
+    if not is_licenza_attiva():
+        add_whatsapp_log("⛔ Ricezione webhook bloccata: Licenza Software Sospesa.", "WARN")
+        return
+
     event = payload.get("event")
     data_payload = payload.get("data", {})
 
@@ -454,11 +493,13 @@ async def elabora_webhook_evolution(payload: dict) -> None:
             if msg.get("key", {}).get("fromMe") == True:
                 continue
                 
-            mittente_id = msg.get("key", {}).get("remoteJid", "")
+            key = msg.get("key", {})
+            remote_jid_alt = key.get("remoteJidAlt", "")
+            mittente_id = key.get("remoteJid", "")
             if "@g.us" in mittente_id:
                 continue
                 
-            phone_number = mittente_id.split("@")[0]
+            phone_number = remote_jid_alt.split("@")[0] if remote_jid_alt else mittente_id.split("@")[0]
             nome_finale = _trova_nome_in_rubrica_locale(phone_number)
             
             if not nome_finale:

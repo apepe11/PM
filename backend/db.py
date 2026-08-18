@@ -1131,7 +1131,9 @@ async def get_filoni_per_cliente(data_target: Optional[str] = None):
     return clienti_filoni
 
 async def get_lista_clienti_registrati():
-    clienti_set = set()
+    clienti_map = {}
+
+    # 1. Carica da particolarita_clienti.json
     part_path = PARTICOLARITA_FILE
     if os.path.exists(part_path):
         try:
@@ -1139,19 +1141,58 @@ async def get_lista_clienti_registrati():
                 data = json.load(f)
                 lista_clienti = data if isinstance(data, list) else []
                 for c in lista_clienti:
-                    nome = c.get("n") or c.get("nome_cliente")
-                    if nome:
-                        clienti_set.add(nome.strip())
+                    nome = (c.get("n") or c.get("nome_cliente") or "").strip()
+                    tel = (c.get("t") or c.get("telefono") or "").strip()
+                    note = (c.get("p") or c.get("particolarita") or "").strip()
+                    if nome or tel:
+                        k = (nome or tel).lower()
+                        clienti_map[k] = {"n": nome or tel, "t": tel, "p": note}
         except Exception:
             pass
 
-    async with get_db_connection() as db:
-        cursor = await db.execute("SELECT DISTINCT mittente FROM ordini WHERE mittente IS NOT NULL AND mittente != ''")
-        rows = await cursor.fetchall()
-        for r in rows:
-            clienti_set.add(r[0].strip())
+    # 2. Carica contatti dalla rubrica WhatsApp Evolution in memoria
+    try:
+        from backend.whatsapp import WHATSAPP_CONTACTS
+        for phone, name in WHATSAPP_CONTACTS.items():
+            nome = str(name or "").strip()
+            tel = str(phone or "").strip()
+            if not tel.startswith("+") and not tel.startswith("39") and len(tel) == 10:
+                tel = "+39" + tel
+            elif not tel.startswith("+"):
+                tel = "+" + tel
+            k = (nome or tel).lower()
+            if k not in clienti_map:
+                clienti_map[k] = {"n": nome or tel, "t": tel, "p": ""}
+            elif not clienti_map[k].get("t") and tel:
+                clienti_map[k]["t"] = tel
+    except Exception:
+        pass
 
-    return sorted(list(clienti_set))
+    # 3. Carica mittenti storici dagli ordini nel database
+    try:
+        async with get_db_connection() as db:
+            cursor = await db.execute("SELECT DISTINCT mittente FROM ordini WHERE mittente IS NOT NULL AND mittente != ''")
+            rows = await cursor.fetchall()
+            for r in rows:
+                raw_m = str(r[0]).strip()
+                if not raw_m:
+                    continue
+                match = re.match(r"^(.*?)\s*\(\+?(\d+)\)$", raw_m)
+                if match:
+                    nome_m = match.group(1).strip()
+                    tel_m = "+" + match.group(2).strip()
+                else:
+                    nome_m = raw_m
+                    tel_m = ""
+                k = (nome_m or raw_m).lower()
+                if k not in clienti_map:
+                    clienti_map[k] = {"n": nome_m or raw_m, "t": tel_m, "p": ""}
+                elif tel_m and not clienti_map[k].get("t"):
+                    clienti_map[k]["t"] = tel_m
+    except Exception:
+        pass
+
+    return sorted(list(clienti_map.values()), key=lambda x: x.get("n", "").lower())
 
 async def sblocca_ordine_confezionamento(id_ordine: int):
     async with get_db_connection() as db:

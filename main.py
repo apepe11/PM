@@ -177,6 +177,8 @@ async def startup_event():
     avvia_loop_sincronizzazione_periodica()
     avvia_loop_auto_retry_ia()
     asyncio.create_task(avvia_whatsapp())
+    from backend.broadcast import avvia_demone_broadcast
+    asyncio.create_task(avvia_demone_broadcast())
 
 @app.get("/api/status")
 def status():
@@ -316,9 +318,37 @@ async def delete_broadcast_schedulato(id_sched: int):
     await elimina_broadcast_schedulato(id_sched)
     return {"status": "success"}
 
+@app.post("/api/broadcast/schedulati/{id_sched}/esegui-ora")
+async def run_scheduled_now(id_sched: int):
+    from backend.broadcast import esegui_task_schedulato_ora
+    success = await esegui_task_schedulato_ora(id_sched)
+    if not success:
+        raise HTTPException(status_code=404, detail="Task schedulato non trovato o lista vuota.")
+    return {"status": "success", "message": "Invio broadcast avviato."}
+
+@app.post("/api/broadcast/invia-ora")
+async def send_broadcast_now_endpoint(payload: dict = Body(...)):
+    id_lista = payload.get("id_lista")
+    messaggio = payload.get("messaggio", "").strip()
+    numero_test = payload.get("numero_test", "").strip()
+    
+    if not messaggio:
+        raise HTTPException(status_code=400, detail="Messaggio obbligatorio.")
+        
+    from backend.broadcast import esegui_broadcast_istantaneo
+    risultato = await esegui_broadcast_istantaneo(id_lista=id_lista, messaggio=messaggio, numero_test=numero_test)
+    return {"status": "success", "risultato": risultato}
+
 @app.get("/api/broadcast/logs")
 async def list_broadcast_logs():
     return await get_broadcast_logs()  # type: ignore
+
+@app.delete("/api/broadcast/logs-all")
+async def clear_all_broadcast_logs_endpoint():
+    async with get_db_connection() as db:
+        await db.execute("DELETE FROM broadcast_logs")
+        await db.commit()
+    return {"status": "success", "message": "Tutti i log eliminati."}
 
 @app.delete("/api/broadcast/logs/{id_log}")
 async def delete_broadcast_log(id_log: int):
