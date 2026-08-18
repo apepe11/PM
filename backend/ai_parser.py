@@ -22,33 +22,33 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY non impostata. Creare un file .env con GROQ_API_KEY=...")
 
-# Liste di priorità per auto-selezione e auto-aggiornamento autonomo dei modelli Groq
+# Liste di priorità per auto-selezione e auto-aggiornamento autonomo dei modelli Groq (esclusivamente 8B / leggeri per Free Tier)
 PREFERRED_PRIMARY_MODELS = [
-    "openai/gpt-oss-20b",
-    "groq/compound",
-    "openai/gpt-oss-120b",
-    "groq/compound-mini",
-    "qwen/qwen3.6-27b",
-    "allam-2-7b"
+    "llama3-8b-8192",
+    "llama-3.1-8b-instant",
+    "llama-3.2-3b-preview",
+    "llama-3.2-1b-preview"
 ]
 
 PREFERRED_FALLBACK_MODELS = [
-    "groq/compound-mini",
-    "groq/compound",
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.6-27b"
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "llama-3.2-3b-preview"
 ]
 
 PREFERRED_AUDIO_MODELS = [
-    "whisper-large-v3-turbo",
-    "whisper-large-v3"
+    "whisper-large-v3",
+    "whisper-large-v3-turbo"
 ]
 
-# Modelli correnti (auto-aggiornati in tempo reale)
-GROQ_MODEL = "openai/gpt-oss-20b"
-GROQ_FALLBACK_MODEL = "groq/compound-mini"
-GROQ_AUDIO_MODEL = "whisper-large-v3-turbo"
+# Modello principale forzato per evitare il rate limit del piano gratuito
+GROQ_MODEL = "llama3-8b-8192"
+
+# Modello di riserva (sempre leggero)
+GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant"
+
+# Modello Audio (invariato)
+GROQ_AUDIO_MODEL = "whisper-large-v3"
 
 GROQ_LOCK = asyncio.Lock()
 LAST_GROQ_REQUEST_TIME = 0.0
@@ -125,7 +125,7 @@ class AIParser:
             models_res = await self.client_groq.models.list()
             active_ids = {m.id for m in models_res.data if getattr(m, "active", True)}
 
-            # 1. Selezione Modello Principale (Text)
+            # 1. Selezione Modello Principale (Text - Esclusivamente modelli leggeri 8B)
             best_primary = None
             for cand in PREFERRED_PRIMARY_MODELS:
                 if cand in active_ids and cand not in self.decommissioned_models:
@@ -133,11 +133,12 @@ class AIParser:
                     break
             if not best_primary:
                 for m_id in active_ids:
-                    if m_id not in self.decommissioned_models and "whisper" not in m_id and "guard" not in m_id:
+                    m_lower = m_id.lower()
+                    if m_id not in self.decommissioned_models and "whisper" not in m_lower and "guard" not in m_lower and "70b" not in m_lower and "120b" not in m_lower:
                         best_primary = m_id
                         break
 
-            # 2. Selezione Modello Fallback (Text)
+            # 2. Selezione Modello Fallback (Text - Esclusivamente modelli leggeri 8B)
             best_fallback = None
             for cand in PREFERRED_FALLBACK_MODELS:
                 if cand in active_ids and cand != best_primary and cand not in self.decommissioned_models:
@@ -145,7 +146,8 @@ class AIParser:
                     break
             if not best_fallback:
                 for m_id in active_ids:
-                    if m_id != best_primary and m_id not in self.decommissioned_models and "whisper" not in m_id and "guard" not in m_id:
+                    m_lower = m_id.lower()
+                    if m_id != best_primary and m_id not in self.decommissioned_models and "whisper" not in m_lower and "guard" not in m_lower and "70b" not in m_lower and "120b" not in m_lower:
                         best_fallback = m_id
                         break
 
@@ -393,7 +395,8 @@ class AIParser:
             async with GROQ_LOCK:
                 now = time.time()
                 elapsed = now - LAST_GROQ_REQUEST_TIME
-                min_pacing = 32.0 
+                # Pausa obbligatoria aumentata a 40 secondi per preservare i token gratuiti
+                min_pacing = 40.0 
                 if elapsed < min_pacing:
                     await asyncio.sleep(min_pacing - elapsed)
                 LAST_GROQ_REQUEST_TIME = time.time()
