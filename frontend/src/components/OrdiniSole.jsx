@@ -12,8 +12,23 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
   const [prodotti, setProdotti] = useState(ord.prodotti || []);
 
   useEffect(() => {
-    setProdotti(ord.prodotti || []);
-  }, [ord.prodotti]);
+    setProdotti(prev => {
+      const incoming = ord.prodotti || [];
+      if (prev.length === 0) return incoming;
+      
+      return incoming.map((incProd, idx) => {
+        const prevProd = prev[idx];
+        if (ord.stato_ordine !== 'CONFERMATO' && prevProd) {
+          return {
+            ...incProd,
+            numero_lotto: prevProd.numero_lotto || incProd.numero_lotto || '',
+            grammatura: prevProd.grammatura || incProd.grammatura || ''
+          };
+        }
+        return incProd;
+      });
+    });
+  }, [ord.prodotti, ord.stato_ordine]);
 
   const handleGroupChange = (indices, field, value) => {
     setProdotti((prev) => {
@@ -97,8 +112,18 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
               const primo = gruppo.items[0].prod;
               const indici = gruppo.items.map((it) => it.idx);
 
+              const isIncompleto = ord.stato_ordine !== 'CONFERMATO' && 
+                                   (!primo.numero_lotto || (!primo.is_peso_fisso && !primo.grammatura));
+
               return (
-                <div key={gruppo.key} className="py-3 flex flex-col xl:flex-row xl:items-end justify-between gap-3 first:pt-0 last:pb-0">
+                <div 
+                  key={gruppo.key} 
+                  className={`py-3 flex flex-col xl:flex-row xl:items-end justify-between gap-3 first:pt-0 last:pb-0 px-2 rounded-xl transition-colors ${
+                    isIncompleto 
+                      ? 'bg-red-50/80 border border-red-300 shadow-sm' 
+                      : ''
+                  }`}
+                >
                   <div className="flex-1 min-w-0 mb-1">
                     <span className="font-extrabold text-petruzzi-950 text-sm truncate block">{primo.nome_articolo || primo.codice_articolo}</span>
                     {primo.is_peso_fisso && (
@@ -126,24 +151,42 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
 
                     <div className="flex flex-col items-start">
                       <label className="text-[9px] font-black text-amber-800 uppercase mb-0.5 ml-0.5">Lotto Art.</label>
-                      <input
-                        type="text"
-                        placeholder="Inserisci lotto"
-                        value={primo.numero_lotto || ''}
-                        onChange={(e) => handleGroupChange(indici, 'numero_lotto', e.target.value.toUpperCase())}
-                        className="w-24 h-[26px] px-2 text-[10px] font-mono font-semibold bg-white border border-amber-300 rounded-md focus:ring-1 focus:ring-amber-700 outline-none shadow-sm placeholder-amber-400"
-                      />
+                      {ord.stato_ordine !== 'CONFERMATO' ? (
+                        <input
+                          type="text"
+                          placeholder="Inserisci lotto"
+                          value={primo.numero_lotto || ''}
+                          onChange={(e) => handleGroupChange(indici, 'numero_lotto', e.target.value.toUpperCase())}
+                          className={`w-24 h-[26px] px-2 text-[10px] font-mono font-semibold bg-white border rounded-md focus:ring-1 outline-none shadow-sm placeholder-amber-400 ${
+                            !primo.numero_lotto
+                              ? 'border-red-400 focus:ring-red-600'
+                              : 'border-amber-300 focus:ring-amber-700'
+                          }`}
+                        />
+                      ) : (
+                        <span className="flex items-center h-[26px] text-[10px] font-mono font-bold text-amber-800 bg-amber-100 px-2 rounded-md border border-amber-200">{primo.numero_lotto || '-'}</span>
+                      )}
                     </div>
 
                     <div className="flex flex-col items-start">
                       <label className="text-[9px] font-black text-amber-800 uppercase mb-0.5 ml-0.5">Grammatura</label>
-                      <input
-                        type="text"
-                        placeholder="Inserisci kg"
-                        value={primo.grammatura || ''}
-                        onChange={(e) => handleGroupChange(indici, 'grammatura', e.target.value)}
-                        className="w-24 h-[26px] px-2 text-[10px] font-semibold bg-white border border-amber-400 rounded-md focus:ring-1 focus:ring-amber-700 outline-none shadow-sm placeholder-amber-400"
-                      />
+                      {ord.stato_ordine !== 'CONFERMATO' ? (
+                        <input
+                          type="text"
+                          placeholder="Inserisci kg"
+                          value={primo.grammatura || ''}
+                          onChange={(e) => handleGroupChange(indici, 'grammatura', e.target.value)}
+                          className={`w-24 h-[26px] px-2 text-[10px] font-semibold bg-white border rounded-md focus:ring-1 outline-none shadow-sm placeholder-amber-400 ${
+                            !primo.grammatura
+                              ? 'border-red-400 focus:ring-red-600'
+                              : 'border-amber-400 focus:ring-amber-700'
+                          }`}
+                        />
+                      ) : (
+                        <span className="flex items-center justify-center w-24 h-[26px] text-[10px] font-bold text-gray-500 bg-gray-100 px-2 rounded-md border border-gray-200">
+                          {primo.grammatura || '-'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -311,9 +354,9 @@ export default function OrdiniSole({ ordini, selectedDate, setSelectedDate, onEd
 
         <div className="flex items-center space-x-2">
           {onReprocessAll && (
-            <button onClick={onReprocessAll} className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 text-xs font-bold border border-amber-300 transition shadow-sm">
+            <button onClick={onReprocessAll} className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 text-xs font-bold border border-amber-300 transition shadow-sm" title="Rielabora ordini delle ultime 48 ore">
               <Sparkles className="w-4 h-4 text-amber-800" />
-              <span>🧠 Rielabora IA</span>
+              <span>🧠 Rielabora IA (ultime 48h)</span>
             </button>
           )}
           <a

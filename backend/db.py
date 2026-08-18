@@ -2,6 +2,7 @@ import json
 import os
 import re
 import ast
+import asyncio
 import aiosqlite
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -454,6 +455,40 @@ async def conferma_ordine(id_ordine: int, prodotti: Optional[list] = None, numer
 
         return True
 
+async def consegna_ordine(id_ordine: int, prodotti: Optional[list] = None):
+    """Aggiorna i prodotti con i pesi inseriti dal corriere e imposta stato_ordine = 'CONSEGNATO'."""
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
+        row = await cursor.fetchone()
+        if not row:
+            return False
+            
+        dati_raw = row[0]
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
+
+        if prodotti is not None:
+            peso_totale = 0.0
+            for p in prodotti:
+                gram = str(p.get("grammatura") or p.get("peso_effettivo") or "").replace(',', '.').replace('KG', '').replace('kg', '').strip()
+                try:
+                    val = float(gram)
+                    peso_totale += val
+                except ValueError:
+                    pass
+            dati_parsed["prodotti"] = prodotti
+            if peso_totale > 0:
+                dati_parsed["peso_reale"] = round(peso_totale, 3)
+
+        dati_parsed["stato_ordine"] = "CONSEGNATO"
+        dati_parsed["data_consegna_effettiva"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        await db.execute(
+            "UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?",
+            (json.dumps(dati_parsed, ensure_ascii=False), id_ordine)
+        )
+        await db.commit()
+        return True
+
 def scomponi_prodotti_pezzi(prodotti: list) -> list:
     prodotti_scomposti = []
     for p in prodotti:
@@ -553,6 +588,7 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 "numero_lotto": lotto_ord,
                 "data_conferma": dati_parsed.get("data_conferma"),
                 "data_confezionamento": dati_parsed.get("data_confezionamento"),
+                "data_consegna_effettiva": dati_parsed.get("data_consegna_effettiva"),
                 "data_ricezione": data_ric,
                 "timestamp_elaborazione": dati_parsed.get("timestamp_elaborazione")
             })
@@ -618,39 +654,136 @@ async def svuota_database_ordini():
         print("🧹 Database ordini e memoria messaggi svuotati con successo.")
         return True
 
-async def rielabora_tutti_ordini():
+async def rielabora_tutti_ordini(ore_limite: int = 48):
     from backend.ai_parser import AIParser
     ai_parser = AIParser(base_dir="catalogo")
     
+    limite_dt = (datetime.now() - timedelta(hours=ore_limite)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 1. Recupera rapidamente le righe e rilascia immediatamente la connessione al DB
     async with get_db_connection() as db:
-        cursor = await db.execute("SELECT id, mittente, testo_originale FROM ordini")
+        cursor = await db.execute(
+            "SELECT id, mittente, testo_originale, data_ricezione FROM ordini WHERE data_ricezione >= ? ORDER BY data_ricezione ASC",
+            (limite_dt,)
+        )
         rows = await cursor.fetchall()
         
-        count = 0
-        for r in rows:
-            id_ord, mittente, testo_orig = r
-            if not testo_orig or "[Inserimento Manuale Dashboard]" in testo_orig:
-                continue
-            
-            clean_text = testo_orig.replace("🎙️ [VOCALE TRASCRITTO]:", "").replace("🎙️ [MESSAGGIO VOCALE]", "").strip()
-            clean_text = re.sub(r'\[Integrazione/Correzione\]:', '', clean_text).strip()
-            
-            if not clean_text:
-                continue
+    count = 0
+    # 2. Elabora con l'IA senza bloccare transazioni aperte su SQLite
+    for r in rows:
+        id_ord, mittente, testo_orig, data_ric = r
+        if not testo_orig or "[Inserimento Manuale Dashboard]" in testo_orig:
+            continue
+        
+        clean_text = testo_orig.replace("🎙️ [VOCALE TRASCRITTO]:", "").replace("🎙️ [MESSAGGIO VOCALE]", "").strip()
+        clean_text = re.sub(r'\[Integrazione/Correzione\]:', '', clean_text).strip()
+        clean_text = re.sub(r'\[Parser Locale.*?\]', '', clean_text).strip()
+        
+        if not clean_text:
+            continue
 
-            risultato_ia = await ai_parser.parse_message(clean_text, client_name=mittente)
-            ordini_ottenuti = (risultato_ia or {}).get("ordini", [])
-            has_valid_order = any(
-                o.get("is_order") and len(o.get("prodotti", [])) > 0
-                for o in ordini_ottenuti
-            )
-            if has_valid_order:
-                json_str = json.dumps(risultato_ia, ensure_ascii=False)
+        msg_dt = None
+        if data_ric:
+            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S'):
+                try:
+                    msg_dt = datetime.strptime(str(data_ric).strip(), fmt)
+                    break
+                except Exception:
+                    pass
+
+        risultato_ia = await ai_parser.parse_message(clean_text, client_name=mittente, message_timestamp=msg_dt)
+        ordini_ottenuti = (risultato_ia or {}).get("ordini", [])
+        has_valid_order = any(
+            o.get("is_order") and len(o.get("prodotti", [])) > 0
+            for o in ordini_ottenuti
+        )
+        if has_valid_order:
+            json_str = json.dumps(risultato_ia, ensure_ascii=False)
+            async with get_db_connection() as db:
                 await db.execute("UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?", (json_str, id_ord))
-                count += 1
-                
-        await db.commit()
-        return count
+                await db.commit()
+            count += 1
+            
+    return count
+
+async def riprova_ordini_parser_locale():
+    """Cerca tutti gli ordini elaborati con il parser locale di riserva o incompleti e riprova ad elaborarli con l'IA."""
+    from backend.ai_parser import AIParser
+    ai_parser = AIParser(base_dir="catalogo")
+
+    async with get_db_connection() as db:
+        cursor = await db.execute(
+            "SELECT id, mittente, testo_originale, data_ricezione, dati_estratti_ia FROM ordini "
+            "WHERE (dati_estratti_ia LIKE '%Parser Locale%' OR testo_originale LIKE '%Parser Locale%' OR dati_estratti_ia LIKE '%Nessun prodotto individuato%') "
+            "ORDER BY id DESC"
+        )
+        rows = await cursor.fetchall()
+
+    if not rows:
+        return 0
+
+    count = 0
+    for r in rows:
+        id_ord, mittente, testo_orig, data_ric, dati_raw = r
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
+        
+        # Se l'ordine è già stato confermato o consegnato, non sovrascrivere
+        if dati_parsed.get("stato_ordine") in ["CONFERMATO", "CONSEGNATO"]:
+            continue
+
+        if not testo_orig or "[Inserimento Manuale Dashboard]" in testo_orig:
+            continue
+
+        clean_text = testo_orig.replace("🎙️ [VOCALE TRASCRITTO]:", "").replace("🎙️ [MESSAGGIO VOCALE]", "").strip()
+        clean_text = re.sub(r'\[Integrazione/Correzione\]:', '', clean_text).strip()
+        clean_text = re.sub(r'\[Parser Locale.*?\]', '', clean_text).strip()
+
+        if not clean_text:
+            continue
+
+        msg_dt = None
+        if data_ric:
+            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S'):
+                try:
+                    msg_dt = datetime.strptime(str(data_ric).strip(), fmt)
+                    break
+                except Exception:
+                    pass
+
+        risultato_ia = await ai_parser.parse_message(clean_text, client_name=mittente, message_timestamp=msg_dt)
+        ordini_ottenuti = (risultato_ia or {}).get("ordini", [])
+        
+        is_success_ai = False
+        for o in ordini_ottenuti:
+            note = str(o.get("note_ordine", ""))
+            if "Parser Locale" not in note and len(o.get("prodotti", [])) > 0:
+                is_success_ai = True
+                break
+
+        if is_success_ai:
+            json_str = json.dumps(risultato_ia, ensure_ascii=False)
+            async with get_db_connection() as db:
+                await db.execute("UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?", (json_str, id_ord))
+                await db.commit()
+            count += 1
+            print(f"✨ [Auto-Retry IA 5min] Ordine #{id_ord} ({mittente}) rielaborato con successo dall'IA!")
+
+    return count
+
+async def _loop_auto_retry_parser_ia():
+    """Esegue ogni 5 minuti il controllo e la rielaborazione automatica con l'IA degli ordini fallback."""
+    while True:
+        try:
+            await asyncio.sleep(300) # 5 minuti
+            count = await riprova_ordini_parser_locale()
+            if count > 0:
+                print(f"✨ [Auto-Retry IA] Rielaborati automaticamente {count} ordini con l'IA.")
+        except Exception as e:
+            print(f"⚠️ Errore nel loop auto-retry IA (5 min): {e}")
+            await asyncio.sleep(30)
+
+def avvia_loop_auto_retry_ia():
+    asyncio.create_task(_loop_auto_retry_parser_ia())
 
 def is_cliente_mulnar(mittente: str) -> bool:
     """Verifica se il mittente o numero corrisponde a Mulnar."""
@@ -743,7 +876,10 @@ def is_ordine_sole(ordine_or_mittente) -> bool:
     if "sole" in full_text or "365" in full_text:
         return True
 
-    numeri_sole_365 = ['3284344912', '181208998756424', '199325305045099', '177188993269891', '393284344912']
+    numeri_sole_365 = [
+        '3284344912', '181208998756424', '199325305045099', '177188993269891', '393284344912',
+        '3341868867', '3270507404', '3286595597', '3889867085', '3495813205', '3287583993', '3924317281'
+    ]
     if any(num in mittente for num in numeri_sole_365):
         return True
 

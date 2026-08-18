@@ -22,11 +22,33 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY non impostata. Creare un file .env con GROQ_API_KEY=...")
 
-# Modello principale (Alta precisione)
-GROQ_MODEL = "llama-3.3-70b-versatile"
-# Modello di riserva (Leggermente meno preciso, ma limiti altissimi per evitare blocchi)
-GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant"
-GROQ_AUDIO_MODEL = "whisper-large-v3"
+# Liste di priorità per auto-selezione e auto-aggiornamento autonomo dei modelli Groq
+PREFERRED_PRIMARY_MODELS = [
+    "openai/gpt-oss-20b",
+    "groq/compound",
+    "openai/gpt-oss-120b",
+    "groq/compound-mini",
+    "qwen/qwen3.6-27b",
+    "allam-2-7b"
+]
+
+PREFERRED_FALLBACK_MODELS = [
+    "groq/compound-mini",
+    "groq/compound",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b"
+]
+
+PREFERRED_AUDIO_MODELS = [
+    "whisper-large-v3-turbo",
+    "whisper-large-v3"
+]
+
+# Modelli correnti (auto-aggiornati in tempo reale)
+GROQ_MODEL = "openai/gpt-oss-20b"
+GROQ_FALLBACK_MODEL = "groq/compound-mini"
+GROQ_AUDIO_MODEL = "whisper-large-v3-turbo"
 
 GROQ_LOCK = asyncio.Lock()
 LAST_GROQ_REQUEST_TIME = 0.0
@@ -83,6 +105,71 @@ class AIParser:
         
         self.client_groq = AsyncGroq(api_key=GROQ_API_KEY, max_retries=0)
         self.current_model = GROQ_MODEL
+        self.fallback_model = GROQ_FALLBACK_MODEL
+        self.audio_model = GROQ_AUDIO_MODEL
+        self.last_discovery_time = 0.0
+        self.decommissioned_models = set()
+
+    async def auto_discover_models(self, force: bool = False, exclude_model: Optional[str] = None):
+        """Rileva automaticamente i modelli attivi e supportati dall'API Groq in tempo reale."""
+        global GROQ_MODEL, GROQ_FALLBACK_MODEL, GROQ_AUDIO_MODEL
+        now = time.time()
+        if exclude_model:
+            self.decommissioned_models.add(exclude_model)
+
+        # Cache di 1 ora per evitare chiamate ripetute a ogni messaggio
+        if not force and not exclude_model and (now - self.last_discovery_time < 3600.0) and GROQ_MODEL not in self.decommissioned_models:
+            return
+
+        try:
+            models_res = await self.client_groq.models.list()
+            active_ids = {m.id for m in models_res.data if getattr(m, "active", True)}
+
+            # 1. Selezione Modello Principale (Text)
+            best_primary = None
+            for cand in PREFERRED_PRIMARY_MODELS:
+                if cand in active_ids and cand not in self.decommissioned_models:
+                    best_primary = cand
+                    break
+            if not best_primary:
+                for m_id in active_ids:
+                    if m_id not in self.decommissioned_models and "whisper" not in m_id and "guard" not in m_id:
+                        best_primary = m_id
+                        break
+
+            # 2. Selezione Modello Fallback (Text)
+            best_fallback = None
+            for cand in PREFERRED_FALLBACK_MODELS:
+                if cand in active_ids and cand != best_primary and cand not in self.decommissioned_models:
+                    best_fallback = cand
+                    break
+            if not best_fallback:
+                for m_id in active_ids:
+                    if m_id != best_primary and m_id not in self.decommissioned_models and "whisper" not in m_id and "guard" not in m_id:
+                        best_fallback = m_id
+                        break
+
+            # 3. Selezione Modello Audio (Whisper)
+            best_audio = None
+            for cand in PREFERRED_AUDIO_MODELS:
+                if cand in active_ids:
+                    best_audio = cand
+                    break
+
+            if best_primary:
+                GROQ_MODEL = best_primary
+                self.current_model = best_primary
+            if best_fallback:
+                GROQ_FALLBACK_MODEL = best_fallback
+                self.fallback_model = best_fallback
+            if best_audio:
+                GROQ_AUDIO_MODEL = best_audio
+                self.audio_model = best_audio
+
+            self.last_discovery_time = now
+            logging.info(f"🤖 [Auto-Discovery Groq] Modelli autonomi aggiornati -> Primario: {GROQ_MODEL} | Fallback: {GROQ_FALLBACK_MODEL} | Audio: {GROQ_AUDIO_MODEL}")
+        except Exception as e:
+            logging.warning(f"⚠️ Errore durante l'auto-discovery modelli Groq: {e}")
 
     def reload_client_rules(self):
         particolarita_path = get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
@@ -203,6 +290,13 @@ class AIParser:
         
         REGOLE: {andrea_rule} "is_cancelled":true se annullato.
         
+        INTEGRAZIONE STORICO (FONDAMENTALE):
+        Se ti viene passato uno "STORICO OGGI", NON ELIMINARE I PRODOTTI GIÀ PRESENTI! 
+        Il tuo compito è UNIRE i prodotti del nuovo messaggio con quelli dello storico. 
+        - Se l'utente fa un'aggiunta (es. "aggiungi 2 ricotte"), restituisci l'array "prodotti" con TUTTO lo storico + le 2 ricotte.
+        - Se l'utente fa una rimozione/modifica, aggiorna le quantità dello storico.
+        L'array "prodotti" finale in JSON deve SEMPRE contenere l'ordine COMPLETO e AGGIORNATO per quella giornata.
+        
         CATALOGO: {catalog_formatted}
         {regole_cliente}
 
@@ -234,6 +328,10 @@ class AIParser:
     async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg", message_timestamp: Optional[datetime] = None):
         global LAST_GROQ_REQUEST_TIME
         
+        # [AUTONOMOUS AI]: Auto-discovery e auto-selezione dinamica dei modelli Groq attivi
+        await self.auto_discover_models()
+        self.current_model = GROQ_MODEL
+        
         if message_timestamp is None:
             message_timestamp = datetime.now()
             
@@ -241,7 +339,7 @@ class AIParser:
 
         if audio_data:
             try:
-                logging.info(f"🎙️ Avvio trascrizione Groq Whisper per {client_name}...")
+                logging.info(f"🎙️ Avvio trascrizione Groq Whisper per {client_name} (Modello: {GROQ_AUDIO_MODEL})...")
                 audio_bytes = base64.b64decode(audio_data)
                 
                 transcription = await self.client_groq.audio.transcriptions.create(
@@ -255,7 +353,10 @@ class AIParser:
                 
                 text_to_parse = f"{text_to_parse}\n[TRASCRIZIONE VOCALE]: {testo_trascritto_vocale}"
             except Exception as e:
-                pass 
+                err_a = str(e).lower()
+                if "model_decommissioned" in err_a or "model_not_found" in err_a or "404" in err_a or "400" in err_a:
+                    logging.warning(f"🎙️ Modello audio {GROQ_AUDIO_MODEL} obsoleto/non valido. Auto-aggiornamento...")
+                    await self.auto_discover_models(force=True, exclude_model=GROQ_AUDIO_MODEL)
 
         testo_per_check = testo_trascritto_vocale if audio_data else text_to_parse
 
@@ -315,6 +416,8 @@ class AIParser:
                     )
                     
                     raw_text = (completion.choices[0].message.content or "").strip()
+                    # Rimuove eventuali tag di reasoning <think>...</think>
+                    raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
                     
                     match_json = re.search(r'(\{.*\})', raw_text, re.DOTALL)
                     if match_json:
@@ -384,9 +487,16 @@ class AIParser:
 
                 except Exception as e:
                     err_str = str(e).lower()
-                    if "rate limit" in err_str or "429" in err_str:
-                        if self.current_model == GROQ_MODEL:
+                    if "model_decommissioned" in err_str or "model_not_found" in err_str or "does not exist" in err_str or ("400" in err_str and "model" in err_str) or "404" in err_str:
+                        logging.warning(f"⚠️ Modello {self.current_model} dismesso/non disponibile su Groq. Auto-selezione autonoma del miglior modello attivo...")
+                        await self.auto_discover_models(force=True, exclude_model=self.current_model)
+                        self.current_model = GROQ_MODEL
+                        await asyncio.sleep(0.5)
+                        continue
+                    elif "rate limit" in err_str or "429" in err_str:
+                        if self.current_model == GROQ_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
                             self.current_model = GROQ_FALLBACK_MODEL
+                            logging.info(f"🔄 Commutazione automatica su modello di riserva {self.current_model} per 429 Rate Limit.")
                         else:
                             await asyncio.sleep(60.0)
                     else:

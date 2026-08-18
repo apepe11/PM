@@ -70,9 +70,9 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
               <button
                 onClick={onReprocessAll}
                 className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold text-xs border border-amber-300 transition shadow-sm"
-                title="Rielabora tutti gli ordini con la nuova chiave IA o parser"
+                title="Rielabora ordini delle ultime 48 ore con l'IA"
               >
-                <span>🧠 Rielabora IA</span>
+                <span>🧠 Rielabora IA (48h)</span>
               </button>
             )}
 
@@ -95,6 +95,7 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
                   <option value="ordini" className="bg-white text-petruzzi-950 font-bold">📦 Ordini Clienti</option>
                   <option value="nuovo-ordine" className="bg-petruzzi-100 text-petruzzi-950 font-black">➕ Creazione Nuovo Ordine</option>
                   <option value="confermati" className="bg-white text-emerald-800 font-bold">✅ Ordini Confermati</option>
+                  <option value="corriere" className="bg-blue-50 text-blue-900 font-bold">🚚 Vista Corriere</option>
                   {/* SPAZIO VUOTO NON SELEZIONABILE */}
                   <option disabled className="bg-gray-100 text-gray-400 text-center font-normal">──────────</option>
 

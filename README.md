@@ -6,7 +6,7 @@ Piattaforma gestionale web ad alta velocità e motore di automazione event-drive
 
 ## 📸 Panoramica del Sistema
 
-Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di testo o **messaggio vocale WhatsApp**), li analizza e struttura tramite i modelli linguistici avanzati di **Groq AI (Llama 3.3 e Whisper v3)**, consolida le quantità nel ciclo quotidiano del laboratorio caseario e fornisce interfacce su misura per il **Casaro**, il **Reparto Confezionamento Tablet**, il **Banco Vendita** e l'**Amministratore / Titolare**.
+Il sistema intercetta in tempo reale gli ordini B2B (inviati via messaggio di testo o **messaggio vocale WhatsApp**), li analizza e struttura tramite i modelli linguistici avanzati di **Groq AI (Llama 3 e Whisper v3)**, consolida le quantità nel ciclo quotidiano del laboratorio caseario e fornisce interfacce su misura per il **Casaro**, il **Reparto Confezionamento Tablet**, il **Banco Vendita** e l'**Amministratore / Titolare**.
 
 Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sistema di Licenza Remota (Call-Home Kill-Switch)** per la gestione SaaS.
 
@@ -15,10 +15,10 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
 ## 🛠️ Stack Tecnologico
 
 - **Backend Core**: FastAPI, Python 3.11+, Uvicorn, SQLite Async (`aiosqlite` in modalità WAL anti-blocco).
-- **Intelligenza Artificiale**: Groq API (`llama-3.3-70b-versatile` per il parsing semantico degli ordini e `whisper-large-v3` per la trascrizione vocale istantanea).
-- **Integrazione WhatsApp**: Evolution API (intercettazione webhook e sincronizzazione periodica contatti/chat).
+- **Intelligenza Artificiale**: Groq API (`openai/gpt-oss-120b` ad alta precisione 120B, `openai/gpt-oss-20b` come fallback resiliente anti-429 e `whisper-large-v3` per la trascrizione vocale istantanea).
+- **Integrazione WhatsApp**: Evolution API (intercettazione webhook, normalizzazione numeri a 10 cifre e sincronizzazione periodica contatti/chat).
 - **Motore PDF**: ReportLab 5.0 (impaginazione nativa vettoriale A4 per schede produzione, bolle confezionamento e distinte pizzerie).
-- **Frontend Grafico**: React 18, Vite, Tailwind CSS, Lucide Icons, Recharts.
+- **Frontend Grafico**: React 18, Vite, Vanilla CSS & Tailwind CSS, Lucide Icons, Recharts.
 - **Packaging & CI/CD**: PyInstaller Standalone (`build.spec`), GitHub Actions (`.github/workflows/build_windows.yml`).
 - **Controllo Licenza**: Call-Home periodico via `httpx` verso GitHub Gist crittografato.
 
@@ -50,11 +50,14 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
   - **Aggiungi / Leva Particolarità con 1-Click**: Pulsante rapido sulle schede cliente per rimuovere una regola o aggiungerne una nuova al volo.
   - **Suggerimenti Rapidi (Tag Regole Frequenti)**: Pulsanti preset nel modal per inserire rapidamente regole come *Filoni Pizzeria*, *Vaschette Fior di Latte 250g*, *Ricotta 500g*, *Senza Lattosio*, *Calcolo a Pezzi*, *Gestione Resi*.
   - **Hot-Reload in Memoria**: L'IA ricarica all'istante le nuove regole senza bisogno di riavviare il server.
+  - **Normalizzazione Telefoni Nazionali**: Pulizia e match esatto dei numeri a 10 cifre (senza troncamenti e con gestione prefissi +39 / 0039).
 
-### 5. 📦 Ordini Clienti & Filtro Giornaliero
+### 5. 📦 Ordini Clienti & Motore IA Resiliente
 - **Filtro Data Avanzato**: Oggi, Domani, Selettore Calendario o Tutti gli Ordini.
+- **Integrazione e Merge dello Storico Giornaliero**: Quando un cliente invia più messaggi o integrazioni nello stesso giorno (es. *"Aggiungi 2 ricotte"*), l'IA unisce i nuovi articoli con lo storico pregresso senza sovrascrivere l'ordine.
 - **Trascrizione Vocali Groq Whisper**: Ogni vocale WhatsApp viene trascritto parola per parola e mostrato con il badge `🎙️ Vocale Trascritto`.
 - **Riconoscimento Clienti e Alias**: Integrazione con la rubrica locale per associare automaticamente i numeri WhatsApp al nome dell'attività.
+- **Auto-Recovery Rate Limit (429)**: Switch automatico sul modello di riserva `openai/gpt-oss-20b` in caso di rate limit temporaneo e ripristino istantaneo al modello primario `openai/gpt-oss-120b` all'ordine successivo.
 
 ### 6. ✅ Ordini Confermati & Tracciabilità Lotto
 - **Flusso Confezionamento**: Gli ordini evasi dal tablet o confermati manualmente si spostano nella cronologia confermati.
@@ -65,6 +68,8 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
 
 ### 7. 📱 Postazione Tablet Confezionamento (`/tablet`)
 - **Interfaccia Touch Screen per Laboratorio**: Ottimizzata per tablet Samsung Galaxy A8 e schermi touch.
+- **Anti-Data Loss su Re-Render**: Preservazione automatica dei campi digitati localmente (`Lotto` e `Grammatura`) durante il polling o gli aggiornamenti di background.
+- **Guida Visiva Articoli Incompleti**: Evidenziazione in rosso con bordo dedicato per le righe e gli input che richiedono ancora la compilazione di lotto o peso reale.
 - **Inserimento Peso & Lotto**: I lavoratori inseriscono i kg reali pesati e confermano l'ordine senza toccare mouse o tastiera.
 
 ### 8. 📊 Statistiche & Controllo di Gestione

@@ -33,6 +33,7 @@ from backend.db import (
     aggiorna_confezionamento_ordine,
     sblocca_ordine_confezionamento,
     conferma_ordine,
+    consegna_ordine,
     get_broadcast_liste,
     salva_broadcast_lista,
     elimina_broadcast_lista,
@@ -42,6 +43,8 @@ from backend.db import (
     get_broadcast_logs,
     elimina_broadcast_log,
     rielabora_tutti_ordini,
+    riprova_ordini_parser_locale,
+    avvia_loop_auto_retry_ia,
     svuota_database_ordini,
     get_data_attiva,
     avanza_data_attiva,
@@ -172,6 +175,7 @@ async def startup_event():
     await init_db()
     asyncio.create_task(controllo_licenza_periodico())
     avvia_loop_sincronizzazione_periodica()
+    avvia_loop_auto_retry_ia()
     asyncio.create_task(avvia_whatsapp())
 
 @app.get("/api/status")
@@ -257,9 +261,14 @@ async def list_ordini_da_verificare(data: Optional[str] = Query(None)):
 
 @app.post("/api/ordini/rielabora-tutti")
 @app.get("/api/ordini/rielabora-tutti")
-async def reprocess_all_orders_endpoint():
-    count = await rielabora_tutti_ordini()
-    return {"status": "success", "message": f"Rielaborati con successo {count} ordini con l'IA ed il parser.", "count": count}
+async def reprocess_all_orders_endpoint(ore: int = 48):
+    count = await rielabora_tutti_ordini(ore_limite=ore)
+    return {"status": "success", "message": f"Rielaborati con successo {count} ordini delle ultime {ore} ore con l'IA.", "count": count}
+
+@app.post("/api/ordini/retry-parser")
+async def retry_parser_orders_endpoint():
+    count = await riprova_ordini_parser_locale()
+    return {"status": "success", "message": f"Rielaborati {count} ordini con l'IA.", "count": count}
 
 @app.put("/api/ordini/{id_ordine}/sblocco")
 async def unlock_confezionamento(id_ordine: int):
@@ -568,6 +577,14 @@ async def confirm_order(id_ordine: int, payload: dict = Body(...)):
     if not success:
         raise HTTPException(status_code=404, detail="Ordine non trovato")
     return {"status": "success", "message": "Ordine confermato."}
+
+@app.put("/api/ordini/{id_ordine}/consegna")
+async def deliver_order(id_ordine: int, payload: dict = Body(...)):
+    prodotti = payload.get("prodotti", [])
+    success = await consegna_ordine(id_ordine, prodotti)
+    if not success:
+        raise HTTPException(status_code=404, detail="Ordine non trovato")
+    return {"status": "success", "message": "Ordine contrassegnato come CONSEGNATO con successo."}
 
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "petruzzi-secret-key")
 

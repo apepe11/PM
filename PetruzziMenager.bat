@@ -85,7 +85,7 @@ echo ==========================================
 echo.
 
 REM Avvia uvicorn in una nuova finestra ridotta a icona per non dare fastidio
-start "Motore Gestionale Petruzzi" /MIN python -m uvicorn main:app --host 0.0.0.0 --port 5000
+start "Motore Gestionale Petruzzi" /MIN python -m uvicorn main:app --host 0.0.0.0 --port 5000 --reload
 
 echo Attendo che il server sia pronto...
 :WAIT_SERVER

@@ -13,14 +13,16 @@ import OrdiniModal from './components/OrdiniModal';
 import OrdiniSole from './components/OrdiniSole';
 import ProduzioneSole from './components/ProduzioneSole'; // NUOVA PRODUZIONE SOLE 365
 import AnagraficaClienti from './components/AnagraficaClienti'; // NUOVA RUBRICA & PARTICOLARITÀ
+import VistaCorriere from './components/VistaCorriere'; // VISTA MOBILE CORRIERE
 import { Printer, CheckCircle, AlertCircle } from 'lucide-react';
 
 export default function App() {
   const isTabletPath = typeof window !== 'undefined' && window.location.pathname === '/tablet';
   const isAdminPath = typeof window !== 'undefined' && window.location.pathname === '/admin';
   const isBroadcastPath = typeof window !== 'undefined' && window.location.pathname === '/broadcast';
+  const isCorrierePath = typeof window !== 'undefined' && (window.location.pathname === '/corriere' || window.location.pathname === '/corriere.html');
   const [activeTab, setActiveTab] = useState(
-    isBroadcastPath ? 'broadcast' : (isAdminPath ? 'admin' : (isTabletPath ? 'tablet' : 'produzione'))
+    isCorrierePath ? 'corriere' : (isBroadcastPath ? 'broadcast' : (isAdminPath ? 'admin' : (isTabletPath ? 'tablet' : 'produzione')))
   );
   
   const getDeliveryDateDefault = () => {
@@ -199,11 +201,11 @@ export default function App() {
   };
 
   const handleReprocessAll = async () => {
-    if (!window.confirm("Vuoi rielaborare tutti gli ordini presenti nel database usando l'IA / Parser aggiornato?")) return;
+    if (!window.confirm("Vuoi rielaborare solo gli ordini delle ultime 48 ore usando l'IA aggiornata?")) return;
     setIsRefreshing(true);
-    showToast("🧠 Rielaborazione ordini con l'IA in corso...");
+    showToast("🧠 Rielaborazione ordini delle ultime 48 ore in corso...");
     try {
-      const res = await fetch(`${API_BASE}/ordini/rielabora-tutti`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/ordini/rielabora-tutti?ore=48`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         showToast(`✅ ${data.message}`);
@@ -305,6 +307,15 @@ export default function App() {
             ordini={ordini}
             selectedDate={selectedDate}
             setSelectedDate={setSelectedDate}
+          />
+        )}
+
+        {activeTab === 'corriere' && (
+          <VistaCorriere
+            ordini={ordini}
+            selectedDate={selectedDate}
+            onOrderDelivered={fetchDashboardData}
+            showToast={showToast}
           />
         )}
 

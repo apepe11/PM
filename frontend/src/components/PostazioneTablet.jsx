@@ -11,36 +11,53 @@ export default function PostazioneTablet() {
   const [toast, setToast] = useState('');
   const [validationError, setValidationError] = useState({});
 
-  const fetchOrdiniTablet = async () => {
-    setIsLoading(true);
+  const fetchOrdiniTablet = async (isBackground = false) => {
+    if (!isBackground) setIsLoading(true);
     try {
       const res = await fetch(`/api/ordini?data=${selectedDate}&scomponi_pezzi=true`);
       if (res.ok) {
         const data = await res.json();
         setOrdini(data);
         
-        const initialForm = {};
-        data.forEach(o => {
-          // Prepara lo stato per ogni SINGOLO pezzo del prodotto
-          initialForm[o.id] = o.prodotti.map(p => ({
-            ...p,
-            // Lascia il lotto completamente vuoto di default per forzare l'inserimento manuale
-            numero_lotto: p.numero_lotto || '',
-            // ORA LA GRAMMATURA E' SEMPRE VUOTA, ANCHE PER I PESI FISSI, PERMETTENDO ALL'OPERATORE DI SCRIVERLA.
-            grammatura: p.grammatura || ''
-          }));
+        setFormData(prev => {
+          const nextForm = {};
+          data.forEach(o => {
+            const isConfezionato = o.stato_confezionamento === 'CONFEZIONATO';
+            const prevProds = prev[o.id] || [];
+            
+            nextForm[o.id] = (o.prodotti || []).map((p, idx) => {
+              const prevP = prevProds[idx];
+              // Se l'ordine non è ancora confezionato, preserva i campi digitati localmente
+              if (!isConfezionato && prevP) {
+                return {
+                  ...p,
+                  numero_lotto: prevP.numero_lotto !== undefined && prevP.numero_lotto !== '' ? prevP.numero_lotto : (p.numero_lotto || ''),
+                  grammatura: prevP.grammatura !== undefined && prevP.grammatura !== '' ? prevP.grammatura : (p.grammatura || '')
+                };
+              }
+              return {
+                ...p,
+                numero_lotto: p.numero_lotto || '',
+                grammatura: p.grammatura || ''
+              };
+            });
+          });
+          return nextForm;
         });
-        setFormData(initialForm);
       }
     } catch (e) {
       console.error("Errore fetch ordini tablet:", e);
     } finally {
-      setIsLoading(false);
+      if (!isBackground) setIsLoading(false);
     }
   };
 
   useEffect(() => {
     fetchOrdiniTablet();
+    const interval = setInterval(() => {
+      fetchOrdiniTablet(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, [selectedDate]);
 
   const handleProductChange = (orderId, prodIndex, field, value) => {
@@ -208,52 +225,73 @@ export default function PostazioneTablet() {
                     <div className="col-span-3"># Lotto</div>
                   </div>
 
-                  {currentProds.map((p, pIdx) => (
-                    <div key={pIdx} className="grid grid-cols-12 gap-4 items-center bg-white p-2 rounded-lg border border-petruzzi-200 shadow-sm">
-                      <div className="col-span-6 flex items-start space-x-3">
-                        {/* BOX QUANTITÀ: Bello visibile a sinistra del nome */}
-                        <div className="flex-shrink-0 min-w-[3.5rem] bg-petruzzi-800 text-white text-center rounded-lg py-1 px-2 flex flex-col justify-center items-center shadow-sm">
-                          <span className="text-sm font-black leading-none">{p.quantita}</span>
-                          <span className="text-[9px] uppercase font-bold tracking-wider leading-none mt-1">{p.unita_di_misura}</span>
-                        </div>
-                        
-                        <div>
-                          <span className="font-bold text-petruzzi-950 block leading-tight">{p.nome_articolo || p.codice_articolo}</span>
-                          {p.pezzi_totali && (
-                            <span className="text-[10px] text-petruzzi-700 font-mono block mt-0.5">Pezzo {p.pezzo_index} di {p.pezzi_totali}</span>
-                          )}
-                          {p.is_peso_fisso && (
-                            <span className="inline-block mt-1 text-[9px] bg-petruzzi-100 text-petruzzi-800 px-1 py-0.5 rounded font-mono uppercase border border-petruzzi-300">
-                              Teorico: {p.peso_unitario_kg} KG
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                  {currentProds.map((p, pIdx) => {
+                    const isLottoMancante = !p.numero_lotto || p.numero_lotto.trim() === '';
+                    const isGrammaturaMancante = !p.grammatura || isNaN(parseFloat(p.grammatura)) || parseFloat(p.grammatura) <= 0;
+                    const isIncompleto = !isConfezionato && (isLottoMancante || isGrammaturaMancante);
 
-                      <div className="col-span-3">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="es. 0.350"
-                          value={p.grammatura}
-                          onChange={(e) => handleProductChange(ord.id, pIdx, 'grammatura', e.target.value)}
-                          disabled={isConfezionato}
-                          className="w-full bg-white border border-amber-400 text-amber-950 font-extrabold text-sm rounded-lg px-3 py-2 outline-none focus:border-petruzzi-700 disabled:opacity-60 shadow-inner"
-                        />
-                      </div>
+                    return (
+                      <div 
+                        key={pIdx} 
+                        className={`grid grid-cols-12 gap-4 items-center p-2 rounded-xl border transition-colors shadow-sm ${
+                          isIncompleto 
+                            ? 'bg-red-50/80 border-red-300 shadow-sm' 
+                            : 'bg-white border-petruzzi-200'
+                        }`}
+                      >
+                        <div className="col-span-6 flex items-start space-x-3">
+                          {/* BOX QUANTITÀ: Bello visibile a sinistra del nome */}
+                          <div className="flex-shrink-0 min-w-[3.5rem] bg-petruzzi-800 text-white text-center rounded-lg py-1 px-2 flex flex-col justify-center items-center shadow-sm">
+                            <span className="text-sm font-black leading-none">{p.quantita}</span>
+                            <span className="text-[9px] uppercase font-bold tracking-wider leading-none mt-1">{p.unita_di_misura}</span>
+                          </div>
+                          
+                          <div>
+                            <span className="font-bold text-petruzzi-950 block leading-tight">{p.nome_articolo || p.codice_articolo}</span>
+                            {p.pezzi_totali && (
+                              <span className="text-[10px] text-petruzzi-700 font-mono block mt-0.5">Pezzo {p.pezzo_index} di {p.pezzi_totali}</span>
+                            )}
+                            {p.is_peso_fisso && (
+                              <span className="inline-block mt-1 text-[9px] bg-petruzzi-100 text-petruzzi-800 px-1 py-0.5 rounded font-mono uppercase border border-petruzzi-300">
+                                Teorico: {p.peso_unitario_kg} KG
+                              </span>
+                            )}
+                          </div>
+                        </div>
 
-                      <div className="col-span-3">
-                        <input
-                          type="text"
-                          placeholder="es. L240813"
-                          value={p.numero_lotto}
-                          onChange={(e) => handleProductChange(ord.id, pIdx, 'numero_lotto', e.target.value.toUpperCase())}
-                          disabled={isConfezionato}
-                          className="w-full bg-white border border-petruzzi-300 text-petruzzi-900 font-bold text-sm font-mono rounded-lg px-3 py-2 outline-none focus:border-petruzzi-700 disabled:opacity-60 placeholder:text-gray-400"
-                        />
+                        <div className="col-span-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="es. 0.350"
+                            value={p.grammatura}
+                            onChange={(e) => handleProductChange(ord.id, pIdx, 'grammatura', e.target.value)}
+                            disabled={isConfezionato}
+                            className={`w-full bg-white border text-amber-950 font-extrabold text-sm rounded-lg px-3 py-2 outline-none focus:ring-1 disabled:opacity-60 shadow-inner ${
+                              !isConfezionato && isGrammaturaMancante
+                                ? 'border-red-400 focus:ring-red-600'
+                                : 'border-amber-400 focus:border-petruzzi-700'
+                            }`}
+                          />
+                        </div>
+
+                        <div className="col-span-3">
+                          <input
+                            type="text"
+                            placeholder="es. L240813"
+                            value={p.numero_lotto}
+                            onChange={(e) => handleProductChange(ord.id, pIdx, 'numero_lotto', e.target.value.toUpperCase())}
+                            disabled={isConfezionato}
+                            className={`w-full bg-white border text-petruzzi-900 font-bold text-sm font-mono rounded-lg px-3 py-2 outline-none focus:ring-1 disabled:opacity-60 placeholder:text-gray-400 ${
+                              !isConfezionato && isLottoMancante
+                                ? 'border-red-400 focus:ring-red-600'
+                                : 'border-petruzzi-300 focus:border-petruzzi-700'
+                            }`}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* BOX MESSAGGIO ORIGINALE */}

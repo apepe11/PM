@@ -208,9 +208,14 @@ def _normalizza_telefono(numero: str) -> str:
     if not numero:
         return ""
     solo_cifre = re.sub(r"\D", "", str(numero))
+    
+    # Rimuove prefissi internazionali italiani (0039 o 39)
     if solo_cifre.startswith("0039"):
+        solo_cifre = solo_cifre[4:]
+    elif solo_cifre.startswith("39") and len(solo_cifre) > 10:
         solo_cifre = solo_cifre[2:]
-    return solo_cifre[-9:] if len(solo_cifre) >= 9 else solo_cifre
+        
+    return solo_cifre
 
 _RUBRICA_CACHE_PATH: Optional[str] = None
 
