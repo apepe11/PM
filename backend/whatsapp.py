@@ -466,16 +466,17 @@ async def elabora_webhook_evolution(payload: dict) -> None:
     if event == "connection.update":
         state = data_payload.get("state")
         if state == "open":
-            WHATSAPP_STATE["stato_connessione"] = "CONNESSO"
-            WHATSAPP_STATE["qr_code_base64"] = None
-            WHATSAPP_STATE["data_connessione"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-            add_whatsapp_log("🟢 WHATSAPP BANCO CONNESSO ED ATTIVO VIA EVOLUTION!", "SUCCESS")
-            asyncio.create_task(_configura_webhook_evolution())
-            asyncio.create_task(_sincronizza_rubrica_evolution())
-            avvia_loop_sincronizzazione_periodica()
+            if WHATSAPP_STATE.get("stato_connessione") != "CONNESSO":
+                WHATSAPP_STATE["stato_connessione"] = "CONNESSO"
+                WHATSAPP_STATE["qr_code_base64"] = None
+                WHATSAPP_STATE["data_connessione"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+                add_whatsapp_log("🟢 WHATSAPP BANCO CONNESSO ED ATTIVO VIA EVOLUTION!", "SUCCESS")
+                asyncio.create_task(_sincronizza_rubrica_evolution())
+                avvia_loop_sincronizzazione_periodica()
         elif state == "close":
-            WHATSAPP_STATE["stato_connessione"] = "DISCONNESSO"
-            add_whatsapp_log("🛑 WhatsApp disconnesso.", "WARN")
+            if WHATSAPP_STATE.get("stato_connessione") != "DISCONNESSO":
+                WHATSAPP_STATE["stato_connessione"] = "DISCONNESSO"
+                add_whatsapp_log("🛑 WhatsApp disconnesso.", "WARN")
         return
 
     if event in ["messages.upsert", "MESSAGES_UPSERT"] or "message" in data_payload or "messages" in data_payload:

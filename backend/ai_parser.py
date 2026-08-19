@@ -11,6 +11,7 @@ from typing import Optional, Tuple, Union, Any
 from dotenv import load_dotenv
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
+from groq import AsyncGroq
 
 from backend.paths import get_persistent_path, get_static_path
 
@@ -26,6 +27,16 @@ if not GEMINI_API_KEY:
 
 # Configurazione del client Google Gemini
 genai.configure(api_key=GEMINI_API_KEY)  # type: ignore
+
+# Setup Groq (Motore di Riserva)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client_groq = None
+if GROQ_API_KEY:
+    try:
+        client_groq = AsyncGroq(api_key=GROQ_API_KEY, timeout=10.0, max_retries=1)
+    except Exception as e:
+        logging.warning(f"⚠️ Errore inizializzazione client Groq: {e}")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
 
 # 🔄 GIOSTRA DEI MODELLI: Lista di tutti i modelli leggeri gratuiti (priorità a quelli con quota 1500 RPD)
 GEMINI_MODELS = [
@@ -260,6 +271,75 @@ class AIParser:
         }}]
         }}"""
 
+    def _format_parsed_result(self, parsed_json: dict, text_to_parse: str, client_name: str, message_timestamp: Optional[datetime]) -> dict:
+        testo_trascritto = parsed_json.get("testo_trascritto", "")
+        ordini_array = parsed_json.get("ordini", [])
+        if not ordini_array and "prodotti" in parsed_json:
+            ordini_array = [parsed_json]
+        
+        for ord_obj in ordini_array:
+            # Estrazione unificata del cliente reale
+            cliente_gemini = ord_obj.get("cliente_reale", "").strip()
+            if cliente_gemini and cliente_gemini.lower() not in ["null", "none", "sconosciuto"]:
+                ord_obj["cliente_id"] = cliente_gemini
+            else:
+                ord_obj["cliente_id"] = estrai_cliente_reale(text_to_parse, client_name, message_timestamp)
+
+            prodotti_parsed = ord_obj.get("prodotti", [])
+            for p in prodotti_parsed:
+                cod = p.get("codice_articolo", "")
+                nome = (p.get("nome_articolo") or "").lower()
+                qta = float(p.get("quantita", 1.0))
+                um = (p.get("unita_di_misura") or "kg").lower()
+
+                match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', nome.replace(',', '.'))
+                peso_unitario = float(match_kg.group(1)) if match_kg else 0.0
+
+                if peso_unitario > 0 and um in ["pezzi", "pz", "pezzo", "vaschette", "unità"]:
+                    p["quantita"] = round(qta * peso_unitario, 3)
+                    p["unita_di_misura"] = "kg"
+
+            if not ord_obj.get("is_cancelled") and len(prodotti_parsed) == 0:
+                ord_obj["is_order"] = False
+                ord_obj["da_verificare_manualmente"] = True
+                if not ord_obj.get("note_ordine"):
+                    ord_obj["note_ordine"] = "Nessun prodotto individuato nel testo/vocale."
+
+        return {
+            "testo_trascritto": testo_trascritto,
+            "ordini": ordini_array
+        }
+
+    async def _try_groq_fallback(self, prompt_sistema: str, prompt_utente: str, text_to_parse: str, client_name: str, message_timestamp: Optional[datetime]) -> Optional[dict]:
+        if not client_groq:
+            return None
+        try:
+            logging.info(f"🔄 Tentativo di fallback su GROQ ({GROQ_MODEL})...")
+            groq_response = await client_groq.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": prompt_sistema},
+                    {"role": "user", "content": prompt_utente}
+                ],
+                response_format={"type": "json_object"},
+                max_completion_tokens=2048,
+                temperature=0.0
+            )
+            raw_text = groq_response.choices[0].message.content
+            if not raw_text:
+                return None
+            raw_text = raw_text.strip()
+            match_json = re.search(r'(\{.*\})', raw_text, re.DOTALL)
+            if match_json:
+                raw_text = match_json.group(1)
+            parsed_json = json.loads(raw_text)
+            result = self._format_parsed_result(parsed_json, text_to_parse, client_name, message_timestamp)
+            logging.info("✅ Ordine salvato con successo dal fallback GROQ!")
+            return result
+        except Exception as groq_e:
+            logging.error(f"⚠️ Errore anche su Groq: {groq_e}. Passo al Parser Locale.")
+            return None
+
     async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg", message_timestamp: Optional[datetime] = None):
         global LAST_GEMINI_REQUEST_TIME
         
@@ -282,6 +362,16 @@ class AIParser:
         if storico_oggi and len(storico_oggi) > 150:
             storico_oggi = "[..]" + storico_oggi[-150:]
 
+        prompt_sistema = self.build_system_instruction(client_name, message_timestamp=message_timestamp)
+        prompt_utente = ""
+        if storico_oggi:
+            prompt_utente += f"STORICO OGGI ({client_name}):\n{storico_oggi}\nNUOVO MSG:\n"
+
+        if audio_data:
+            prompt_utente += f"Ascolta l'audio allegato inviato da {client_name}. Trascrivilo nel campo 'testo_trascritto'."
+        else:
+            prompt_utente += f"\"{text_to_parse}\""
+
         max_attempts = 4
 
         for attempt in range(max_attempts):
@@ -300,19 +390,9 @@ class AIParser:
                 logging.info(f"🔄 Usando il modello: {current_model} (Tentativo {attempt+1}) per {client_name}")
 
                 try:
-                    prompt_sistema = self.build_system_instruction(client_name, message_timestamp=message_timestamp)
-                    
                     contents = []
-                    prompt_utente = ""
-                    if storico_oggi:
-                        prompt_utente += f"STORICO OGGI ({client_name}):\n{storico_oggi}\nNUOVO MSG:\n"
-                    
                     if audio_data:
-                        prompt_utente += f"Ascolta l'audio allegato inviato da {client_name}. Trascrivilo nel campo 'testo_trascritto'."
                         contents.append({"mime_type": mime_type, "data": audio_data})
-                    else:
-                        prompt_utente += f"\"{text_to_parse}\""
-                        
                     contents.append(prompt_utente)
 
                     model = genai.GenerativeModel(  # type: ignore
@@ -332,52 +412,40 @@ class AIParser:
                         raw_text = match_json.group(1)
 
                     parsed_json = json.loads(raw_text)
-                    testo_trascritto = parsed_json.get("testo_trascritto", "")
-                    ordini_array = parsed_json.get("ordini", [])
-                    if not ordini_array and "prodotti" in parsed_json:
-                        ordini_array = [parsed_json]
-                    
-                    for ord_obj in ordini_array:
-                        # Estrazione unificata del cliente reale
-                        cliente_gemini = ord_obj.get("cliente_reale", "").strip()
-                        if cliente_gemini and cliente_gemini.lower() not in ["null", "none", "sconosciuto"]:
-                            ord_obj["cliente_id"] = cliente_gemini
-                        else:
-                            ord_obj["cliente_id"] = estrai_cliente_reale(text_to_parse, client_name, message_timestamp)
-
-                        prodotti_parsed = ord_obj.get("prodotti", [])
-                        for p in prodotti_parsed:
-                            cod = p.get("codice_articolo", "")
-                            nome = (p.get("nome_articolo") or "").lower()
-                            qta = float(p.get("quantita", 1.0))
-                            um = (p.get("unita_di_misura") or "kg").lower()
-
-                            match_kg = re.search(r'(\d+(?:\.\d+)?)\s*kg\b', nome.replace(',', '.'))
-                            peso_unitario = float(match_kg.group(1)) if match_kg else 0.0
-
-                            if peso_unitario > 0 and um in ["pezzi", "pz", "pezzo", "vaschette", "unità"]:
-                                p["quantita"] = round(qta * peso_unitario, 3)
-                                p["unita_di_misura"] = "kg"
-
-                        if not ord_obj.get("is_cancelled") and len(prodotti_parsed) == 0:
-                            ord_obj["is_order"] = False
-                            ord_obj["da_verificare_manualmente"] = True
-                            if not ord_obj.get("note_ordine"):
-                                ord_obj["note_ordine"] = "Nessun prodotto individuato nel testo/vocale."
-
-                    return {
-                        "testo_trascritto": testo_trascritto,
-                        "ordini": ordini_array
-                    }
+                    return self._format_parsed_result(parsed_json, text_to_parse, client_name, message_timestamp)
 
                 except ResourceExhausted as e:
-                    logging.warning(f"⚠️ Quota/Rate Limit per {current_model}. Passaggio rapido al modello successivo...")
-                    await asyncio.sleep(1.5) 
+                    logging.warning(f"⚠️ Rate Limit Gemini raggiunto per {current_model}. Tento il fallback su GROQ...")
+                    
+                    if client_groq and not audio_data:
+                        groq_res = await self._try_groq_fallback(
+                            prompt_sistema=prompt_sistema,
+                            prompt_utente=prompt_utente,
+                            text_to_parse=text_to_parse,
+                            client_name=client_name,
+                            message_timestamp=message_timestamp
+                        )
+                        if groq_res is not None:
+                            return groq_res
+
+                    await asyncio.sleep(2.0) 
                     if attempt == max_attempts - 1:
                         return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
                         
                 except Exception as e:
-                    logging.error(f"⚠️ Errore Gemini API: {e}")
+                    logging.error(f"⚠️ Errore Gemini API ({current_model}): {e}")
+                    
+                    if client_groq and not audio_data:
+                        groq_res = await self._try_groq_fallback(
+                            prompt_sistema=prompt_sistema,
+                            prompt_utente=prompt_utente,
+                            text_to_parse=text_to_parse,
+                            client_name=client_name,
+                            message_timestamp=message_timestamp
+                        )
+                        if groq_res is not None:
+                            return groq_res
+
                     await asyncio.sleep(1.0)
                     if attempt == max_attempts - 1:
                         return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
