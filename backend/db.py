@@ -15,36 +15,41 @@ DB_FILE = get_persistent_path("petruzzi_ordini.db")
 def parse_dati_estratti_ia(dati_raw) -> dict:
     if not dati_raw:
         return {}
+    res = {}
     if isinstance(dati_raw, dict):
-        return dati_raw
-    if isinstance(dati_raw, list):
+        res = dati_raw
+    elif isinstance(dati_raw, list):
         for item in dati_raw:
             if isinstance(item, dict):
-                return item
-        return {}
-    if isinstance(dati_raw, str):
+                res = item
+                break
+    elif isinstance(dati_raw, str):
         try:
-            res = json.loads(dati_raw)
-            if isinstance(res, dict):
-                return res
-            if isinstance(res, list):
-                for item in res:
+            parsed = json.loads(dati_raw)
+            if isinstance(parsed, dict):
+                res = parsed
+            elif isinstance(parsed, list):
+                for item in parsed:
                     if isinstance(item, dict):
-                        return item
-                return {}
+                        res = item
+                        break
         except Exception:
-            pass
-        try:
-            res = ast.literal_eval(dati_raw)
-            if isinstance(res, dict):
-                return res
-            if isinstance(res, list):
-                for item in res:
-                    if isinstance(item, dict):
-                        return item
+            try:
+                parsed = ast.literal_eval(dati_raw)
+                if isinstance(parsed, dict):
+                    res = parsed
+                elif isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, dict):
+                            res = item
+                            break
+            except Exception:
                 return {}
-        except Exception:
-            return {}
+    
+    if isinstance(res, dict):
+        if "ordini" in res and isinstance(res["ordini"], list) and len(res["ordini"]) > 0:
+            return res["ordini"][0]
+        return res
     return {}
 
 def get_db_connection():
@@ -712,6 +717,96 @@ async def svuota_database_ordini():
         print("🧹 Database ordini e memoria messaggi svuotati con successo.")
         return True
 
+async def rielabora_singolo_ordine(id_ordine: int) -> dict:
+    from backend.ai_parser import AIParser
+    ai_parser = AIParser(base_dir="catalogo")
+    
+    async with get_db_connection() as db:
+        cursor = await db.execute(
+            "SELECT id, mittente, testo_originale, data_ricezione, dati_estratti_ia FROM ordini WHERE id = ?",
+            (id_ordine,)
+        )
+        row = await cursor.fetchone()
+        
+    if not row:
+        return {"status": "error", "message": f"Ordine #{id_ordine} non trovato."}
+        
+    id_ord, mittente, testo_orig, data_ric, dati_raw = row
+    dati_parsed = parse_dati_estratti_ia(dati_raw)
+    
+    clean_text = (testo_orig or "").replace("🎙️ [VOCALE TRASCRITTO]:", "").replace("🎙️ [MESSAGGIO VOCALE]", "").strip()
+    clean_text = re.sub(r'\[Integrazione/Correzione\]:', '', clean_text).strip()
+    clean_text = re.sub(r'\[Parser Locale.*?\]', '', clean_text).strip()
+    clean_text = re.sub(r'\[Inserimento Manuale Dashboard\]', '', clean_text).strip()
+    
+    if not clean_text:
+        # Se non c'è testo nel messaggio originale, controlla se ci sono note
+        if dati_parsed.get("note_ordine"):
+            clean_text = dati_parsed.get("note_ordine").strip()
+            
+    if not clean_text:
+        return {"status": "error", "message": "Nessun testo originale disponibile per rielaborare questo ordine con l'IA."}
+        
+    msg_dt = None
+    if data_ric:
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S'):
+            try:
+                msg_dt = datetime.strptime(str(data_ric).strip(), fmt)
+                break
+            except Exception:
+                pass
+                
+    risultato_ia = await ai_parser.parse_message(clean_text, client_name=mittente, message_timestamp=msg_dt)
+    
+    if not risultato_ia:
+        return {"status": "error", "message": "Nessuna risposta ricevuta dall'IA."}
+        
+    ordini_ottenuti = risultato_ia.get("ordini", [])
+    if not ordini_ottenuti and "prodotti" in risultato_ia:
+        ordini_ottenuti = [risultato_ia]
+        
+    if not ordini_ottenuti:
+        return {"status": "error", "message": "L'IA non ha rilevato articoli o ordini validi nel testo."}
+        
+    ord_singolo = ordini_ottenuti[0]
+    ord_singolo["timestamp_elaborazione"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Normalizza data consegna
+    corrected_date = await normalize_data_consegna(ord_singolo.get("data_consegna"), data_ric)
+    if corrected_date:
+        ord_singolo["data_consegna"] = corrected_date
+    elif dati_parsed.get("data_consegna"):
+        ord_singolo["data_consegna"] = dati_parsed.get("data_consegna")
+        
+    # Reset stato
+    ord_singolo["stato_ordine"] = "IN_ATTESA"
+    ord_singolo["stato_confezionamento"] = "DA_CONFEZIONARE"
+    ord_singolo["da_verificare_manualmente"] = False
+    
+    prodotti = ord_singolo.get("prodotti", [])
+    is_cancelled = ord_singolo.get("is_cancelled", False)
+    if len(prodotti) == 0 and not is_cancelled:
+        ord_singolo["is_order"] = False
+    else:
+        ord_singolo["is_order"] = True
+        
+    nuovo_cliente = ord_singolo.get("cliente_id") or mittente
+    json_str = json.dumps(ord_singolo, ensure_ascii=False)
+    
+    async with get_db_connection() as db:
+        await db.execute(
+            "UPDATE ordini SET mittente = ?, dati_estratti_ia = ? WHERE id = ?",
+            (nuovo_cliente, json_str, id_ord)
+        )
+        await db.commit()
+        
+    print(f"✨ [Rielabora Singolo Ordine] Ordine #{id_ord} ({nuovo_cliente}) rielaborato con successo dall'IA!")
+    return {
+        "status": "success",
+        "message": f"Ordine #{id_ord} ({nuovo_cliente}) rielaborato con successo dall'IA!",
+        "ordine": ord_singolo
+    }
+
 async def rielabora_tutti_ordini(ore_limite: int = 48):
     from backend.ai_parser import AIParser
     ai_parser = AIParser(base_dir="catalogo")
@@ -755,12 +850,17 @@ async def rielabora_tutti_ordini(ore_limite: int = 48):
 
         risultato_ia = await ai_parser.parse_message(clean_text, client_name=mittente, message_timestamp=msg_dt)
         ordini_ottenuti = (risultato_ia or {}).get("ordini", [])
+        if not ordini_ottenuti and "prodotti" in (risultato_ia or {}):
+            ordini_ottenuti = [risultato_ia]
+
         has_valid_order = any(
             o.get("is_order") and len(o.get("prodotti", [])) > 0
             for o in ordini_ottenuti
         )
         if has_valid_order:
-            json_str = json.dumps(risultato_ia, ensure_ascii=False)
+            ord_salva = ordini_ottenuti[0]
+            ord_salva["timestamp_elaborazione"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            json_str = json.dumps(ord_salva, ensure_ascii=False)
             async with get_db_connection() as db:
                 await db.execute("UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?", (json_str, id_ord))
                 await db.commit()

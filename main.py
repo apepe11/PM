@@ -42,6 +42,7 @@ from backend.db import (
     elimina_broadcast_schedulato,
     get_broadcast_logs,
     elimina_broadcast_log,
+    rielabora_singolo_ordine,
     rielabora_tutti_ordini,
     riprova_ordini_parser_locale,
     avvia_loop_auto_retry_ia,
@@ -274,6 +275,13 @@ async def list_ordini(data: Optional[str] = Query(None), scomponi_pezzi: bool = 
 async def list_ordini_da_verificare(data: Optional[str] = Query(None)):
     tutti = await get_tutti_ordini(data, includi_non_ordini=True)  # type: ignore
     return [o for o in tutti if not o.get("is_order", True) and not o.get("is_cancelled") and len(o.get("prodotti", [])) == 0]
+
+@app.post("/api/ordini/{id_ordine}/rielabora")
+async def reprocess_single_order_endpoint(id_ordine: int):
+    res = await rielabora_singolo_ordine(id_ordine)
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Errore durante la rielaborazione dell'ordine."))
+    return res
 
 @app.post("/api/ordini/rielabora-tutti")
 @app.get("/api/ordini/rielabora-tutti")

@@ -8,8 +8,9 @@ const isCaciocavalloSilanoDop = (prod) => {
   return nome.includes('caciocavallo silano') || (nome.includes('caciocavallo') && nome.includes('dop'));
 };
 
-const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConfirmId, setDeleteConfirmId }) => {
+const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConfirmId, setDeleteConfirmId, onReprocessOrder, reprocessingOrderId }) => {
   const [prodotti, setProdotti] = useState(ord.prodotti || []);
+  const isReprocessing = reprocessingOrderId === ord.id;
 
   useEffect(() => {
     setProdotti(prev => {
@@ -249,12 +250,13 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <a
             href={`/api/pdf/ordine/${ord.id}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center py-2 px-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 font-extrabold text-xs border border-amber-300 transition shadow-sm"
+            className="flex items-center justify-center space-x-1 py-2 px-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 font-extrabold text-xs border border-amber-300 transition shadow-sm"
+            title="Visualizza o Stampa PDF Ordine Sole 365"
           >
             <span>📄 PDF</span>
           </a>
@@ -262,7 +264,7 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
           <button
             type="button"
             onClick={() => onEditOrder(ord)}
-            className="flex items-center justify-center space-x-1 py-2 px-2 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-black text-xs transition shadow-sm border border-amber-900"
+            className="flex items-center justify-center space-x-1.5 py-2 px-2 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-black text-xs transition shadow-sm border border-amber-900"
             title="Aggiusta / Modifica Ordine"
           >
             <Edit3 className="w-3.5 h-3.5 text-amber-200" />
@@ -271,11 +273,27 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
 
           <button
             type="button"
+            disabled={isReprocessing}
+            onClick={() => onReprocessOrder && onReprocessOrder(ord.id)}
+            className={`flex items-center justify-center space-x-1.5 py-2 px-2 rounded-xl text-xs font-black border transition shadow-sm ${
+              isReprocessing
+                ? 'bg-amber-200 text-amber-700 border-amber-400 cursor-not-allowed opacity-75'
+                : 'bg-amber-200 hover:bg-amber-300 text-amber-950 border-amber-400'
+            }`}
+            title="Rielabora questo singolo ordine con l'IA"
+          >
+            <Sparkles className={`w-3.5 h-3.5 text-amber-800 ${isReprocessing ? 'animate-spin' : ''}`} />
+            <span>{isReprocessing ? 'In corso...' : 'Rielabora IA'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setDeleteConfirmId(ord.id)}
-            className="flex items-center justify-center py-2 px-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-800 font-extrabold text-xs border border-red-300 transition shadow-sm"
+            className="flex items-center justify-center space-x-1.5 py-2 px-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-800 font-extrabold text-xs border border-red-300 transition shadow-sm"
             title="Elimina Ordine"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-3.5 h-3.5 text-red-700" />
+            <span>Elimina</span>
           </button>
         </div>
 
@@ -303,7 +321,7 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
   );
 };
 
-export default function OrdiniSole({ ordini, selectedDate, setSelectedDate, onEditOrder, onDeleteOrder, onConfirmOrder, onOpenNewOrderModal, onReprocessAll }) {
+export default function OrdiniSole({ ordini, selectedDate, setSelectedDate, onEditOrder, onDeleteOrder, onConfirmOrder, onOpenNewOrderModal, onReprocessOrder, reprocessingOrderId }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
@@ -366,12 +384,6 @@ export default function OrdiniSole({ ordini, selectedDate, setSelectedDate, onEd
         </div>
 
         <div className="flex items-center space-x-2">
-          {onReprocessAll && (
-            <button onClick={onReprocessAll} className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 text-xs font-bold border border-amber-300 transition shadow-sm" title="Rielabora ordini delle ultime 48 ore">
-              <Sparkles className="w-4 h-4 text-amber-800" />
-              <span>🧠 Rielabora IA (ultime 48h)</span>
-            </button>
-          )}
           <a
             href={`/api/pdf/sole${selectedDate ? `?data=${selectedDate}` : ''}`}
             target="_blank"
@@ -429,6 +441,8 @@ export default function OrdiniSole({ ordini, selectedDate, setSelectedDate, onEd
               onDeleteOrder={onDeleteOrder}
               deleteConfirmId={deleteConfirmId}
               setDeleteConfirmId={setDeleteConfirmId}
+              onReprocessOrder={onReprocessOrder}
+              reprocessingOrderId={reprocessingOrderId}
             />
           ))
         )}

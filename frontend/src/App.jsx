@@ -225,23 +225,25 @@ export default function App() {
     }
   };
 
-  const handleReprocessAll = async () => {
-    if (!window.confirm("Vuoi rielaborare solo gli ordini delle ultime 48 ore usando l'IA aggiornata?")) return;
-    setIsRefreshing(true);
-    showToast("🧠 Rielaborazione ordini delle ultime 48 ore in corso...");
+  const [reprocessingOrderId, setReprocessingOrderId] = useState(null);
+
+  const handleReprocessOrder = async (id_ordine) => {
+    if (!window.confirm(`Vuoi rielaborare l'ordine #${id_ordine} con l'IA?`)) return;
+    setReprocessingOrderId(id_ordine);
+    showToast(`🧠 Rielaborazione ordine #${id_ordine} con l'IA in corso...`);
     try {
-      const res = await fetch(`${API_BASE}/ordini/rielabora-tutti?ore=48`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/ordini/${id_ordine}/rielabora`, { method: 'POST' });
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
-        showToast(`✅ ${data.message}`);
+        showToast(data.message || `✅ Ordine #${id_ordine} rielaborato con successo!`);
         fetchDashboardData();
       } else {
-        showToast("Errore durante la rielaborazione degli ordini", 'error');
+        showToast(data.detail || data.message || "Errore durante la rielaborazione dell'ordine", 'error');
       }
     } catch (e) {
-      showToast("Errore di connessione", 'error');
+      showToast("Errore di connessione durante la rielaborazione", 'error');
     } finally {
-      setIsRefreshing(false);
+      setReprocessingOrderId(null);
     }
   };
 
@@ -270,7 +272,6 @@ export default function App() {
         setSelectedDate={setSelectedDate}
         onOpenNewOrderModal={handleOpenNewOrderModal}
         onRefresh={handleRefreshClick}
-        onReprocessAll={handleReprocessAll}
         isRefreshing={isRefreshing}
       />
 
@@ -313,6 +314,8 @@ export default function App() {
             onDeleteOrder={handleDeleteOrder}
             onConfirmOrder={handleConfirmOrderInline}
             onOpenNewOrderModal={handleOpenNewOrderModal}
+            onReprocessOrder={handleReprocessOrder}
+            reprocessingOrderId={reprocessingOrderId}
           />
         )}
 
@@ -325,7 +328,8 @@ export default function App() {
             onDeleteOrder={handleDeleteOrder}
             onConfirmOrder={handleConfirmOrderInline}
             onOpenNewOrderModal={handleOpenNewOrderModal}
-            onReprocessAll={handleReprocessAll}
+            onReprocessOrder={handleReprocessOrder}
+            reprocessingOrderId={reprocessingOrderId}
           />
         )}
 

@@ -249,14 +249,14 @@ class AIParser:
         if storico_oggi and len(storico_oggi) > 150:
             storico_oggi = "[..]" + storico_oggi[-150:]
 
-        max_attempts = 3
+        max_attempts = 4
 
         for attempt in range(max_attempts):
             async with GEMINI_LOCK:
                 now = time.time()
                 elapsed = now - LAST_GEMINI_REQUEST_TIME
-                # Pacing Gemini: 10 RPM max = 1 richiesta ogni 6 secondi per la massima sicurezza.
-                min_pacing = 6.0 
+                # Pacing Gemini: 4 RPM max = 1 richiesta ogni 15 secondi per evitare rate limit e crash
+                min_pacing = 15.0 
                 if elapsed < min_pacing:
                     await asyncio.sleep(min_pacing - elapsed)
                 LAST_GEMINI_REQUEST_TIME = time.time()
@@ -368,8 +368,8 @@ class AIParser:
                     }
 
                 except ResourceExhausted as e:
-                    logging.warning(f"⚠️ Rate Limit Gemini raggiunto. Attesa di 10 secondi...")
-                    await asyncio.sleep(10.0)
+                    logging.warning(f"⚠️ Rate Limit Gemini raggiunto (4 RPM). Attesa di 15 secondi...")
+                    await asyncio.sleep(15.0)
                     if attempt == max_attempts - 1:
                         return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
                         

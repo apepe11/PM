@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronDown, Tablet, ShieldCheck } from 'lucide-react';
 
-export default function Header({ activeTab, setActiveTab, selectedDate, setSelectedDate, onOpenNewOrderModal, onRefresh, onReprocessAll, isRefreshing }) {
+export default function Header({ activeTab, setActiveTab, selectedDate, setSelectedDate, onOpenNewOrderModal, onRefresh, isRefreshing }) {
   return (
     <header className="sticky top-0 z-40 petruzzi-header-glow backdrop-blur-xl border-b border-petruzzi-700/20 shadow-md bg-white/95 text-petruzzi-950">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
