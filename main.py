@@ -190,7 +190,6 @@ async def startup_event():
     await init_db()
     asyncio.create_task(controllo_licenza_periodico())
     avvia_loop_sincronizzazione_periodica()
-    avvia_loop_auto_retry_ia()
     asyncio.create_task(avvia_whatsapp())
     from backend.broadcast import avvia_demone_broadcast
     asyncio.create_task(avvia_demone_broadcast())

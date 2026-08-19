@@ -59,10 +59,12 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
     });
   }
 
+  const isLocalFallback = ord.is_fallback || ord.fonte_parser === 'LOCALE' || ord.elaborato_da === 'PARSER_LOCALE' || ord.da_verificare_manualmente || (ord.note_ordine && ord.note_ordine.includes('Parser Locale'));
+
   return (
     <div
       className={`petruzzi-card p-6 rounded-3xl border-2 transition-all flex flex-col lg:flex-row items-stretch justify-between gap-6 shadow-md hover:shadow-lg ${
-        ord.da_verificare_manualmente
+        isLocalFallback
           ? 'border-amber-500 bg-amber-50/95'
           : 'border-amber-300/80 bg-white/95 hover:border-amber-400'
       }`}
@@ -75,15 +77,15 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
             </h3> 
             
             <div className="flex flex-wrap items-center gap-1.5 mt-1">
-              {ord.fonte_parser === 'LOCALE' || ord.elaborato_da === 'PARSER_LOCALE' || ord.da_verificare_manualmente ? (
-                <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 text-[10px] font-black uppercase border border-amber-400 shadow-sm animate-pulse">
-                  <AlertTriangle className="w-3 h-3 text-amber-700" />
-                  <span>⚠️ Parser Locale (Da Verificare)</span>
+              {isLocalFallback ? (
+                <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-950 text-[10px] font-black uppercase border border-orange-400 shadow-sm animate-pulse">
+                  <AlertTriangle className="w-3 h-3 text-orange-700" />
+                  <span>⚠️ ESTRATTO IN EMERGENZA (CONTROLLARE)</span>
                 </span>
               ) : (
                 <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-black uppercase border border-emerald-300 shadow-sm">
                   <Sparkles className="w-3 h-3 text-emerald-700" />
-                  <span>🤖 Estratto con IA</span>
+                  <span>🤖 ESTRATTO CON IA</span>
                 </span>
               )}
             </div>

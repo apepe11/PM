@@ -3,6 +3,7 @@ import os
 import re
 import ast
 import asyncio
+import logging
 import aiosqlite
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -602,6 +603,11 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 if not p.get("numero_lotto"):
                     p["numero_lotto"] = lotto_ord
 
+            is_fallback_rec = bool(dati_parsed.get("is_fallback")) or (
+                "[Parser Locale" in str(dati_parsed.get("note_ordine", ""))
+                or "[Parser Locale" in str(testo_orig or "")
+            )
+
             ordini_lista.append({
                 "id": id_ord,
                 "mittente": mittente,
@@ -612,6 +618,7 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 "is_order": dati_parsed.get("is_order", len(prodotti) > 0),
                 "is_cancelled": is_cancelled_rec,
                 "da_verificare_manualmente": dati_parsed.get("da_verificare_manualmente", False),
+                "is_fallback": is_fallback_rec,
                 "stato_ordine": dati_parsed.get("stato_ordine", "IN_ATTESA"),
                 "stato_confezionamento": dati_parsed.get("stato_confezionamento", "DA_CONFEZIONARE"),
                 "peso_reale": dati_parsed.get("peso_reale"),
@@ -738,11 +745,14 @@ async def rielabora_singolo_ordine(id_ordine: int) -> dict:
     clean_text = re.sub(r'\[Integrazione/Correzione\]:', '', clean_text).strip()
     clean_text = re.sub(r'\[Parser Locale.*?\]', '', clean_text).strip()
     clean_text = re.sub(r'\[Inserimento Manuale Dashboard\]', '', clean_text).strip()
+    clean_text = clean_text.strip().strip('"').strip("'").strip()
     
     if not clean_text:
         # Se non c'è testo nel messaggio originale, controlla se ci sono note
         if dati_parsed.get("note_ordine"):
-            clean_text = dati_parsed.get("note_ordine").strip()
+            note_clean = re.sub(r'\[Parser Locale.*?\]', '', dati_parsed.get("note_ordine", "")).strip().strip('"').strip("'")
+            if note_clean:
+                clean_text = note_clean
             
     if not clean_text:
         return {"status": "error", "message": "Nessun testo originale disponibile per rielaborare questo ordine con l'IA."}
@@ -781,7 +791,9 @@ async def rielabora_singolo_ordine(id_ordine: int) -> dict:
     # Reset stato
     ord_singolo["stato_ordine"] = "IN_ATTESA"
     ord_singolo["stato_confezionamento"] = "DA_CONFEZIONARE"
-    ord_singolo["da_verificare_manualmente"] = False
+    if not ord_singolo.get("is_fallback"):
+        ord_singolo["is_fallback"] = False
+        ord_singolo["da_verificare_manualmente"] = False
     
     prodotti = ord_singolo.get("prodotti", [])
     is_cancelled = ord_singolo.get("is_cancelled", False)
@@ -800,10 +812,19 @@ async def rielabora_singolo_ordine(id_ordine: int) -> dict:
         )
         await db.commit()
         
-    print(f"✨ [Rielabora Singolo Ordine] Ordine #{id_ord} ({nuovo_cliente}) rielaborato con successo dall'IA!")
+    usato_fallback = any(ordine.get("is_fallback", False) for ordine in ordini_ottenuti) or ord_singolo.get("is_fallback", False)
+    if usato_fallback:
+        logging.warning(f"⚠️ [Elaborazione Ordine] Ordine #{id_ord} ({nuovo_cliente}) salvato dal Parser Locale di Emergenza!")
+        print(f"⚠️ [Rielabora Singolo Ordine] Ordine #{id_ord} ({nuovo_cliente}) salvato dal Parser Locale di Emergenza!")
+        msg_out = f"⚠️ Ordine #{id_ord} ({nuovo_cliente}) elaborato in emergenza (da verificare)"
+    else:
+        logging.info(f"✨ [Elaborazione Ordine] Ordine #{id_ord} ({nuovo_cliente}) elaborato con successo dall'IA!")
+        print(f"✨ [Rielabora Singolo Ordine] Ordine #{id_ord} ({nuovo_cliente}) rielaborato con successo dall'IA!")
+        msg_out = f"✨ Ordine #{id_ord} ({nuovo_cliente}) rielaborato con successo dall'IA!"
+
     return {
         "status": "success",
-        "message": f"Ordine #{id_ord} ({nuovo_cliente}) rielaborato con successo dall'IA!",
+        "message": msg_out,
         "ordine": ord_singolo
     }
 
@@ -932,20 +953,9 @@ async def riprova_ordini_parser_locale():
 
     return count
 
-async def _loop_auto_retry_parser_ia():
-    """Esegue ogni 5 minuti il controllo e la rielaborazione automatica con l'IA degli ordini fallback."""
-    while True:
-        try:
-            await asyncio.sleep(300) # 5 minuti
-            count = await riprova_ordini_parser_locale()
-            if count > 0:
-                print(f"✨ [Auto-Retry IA] Rielaborati automaticamente {count} ordini con l'IA.")
-        except Exception as e:
-            print(f"⚠️ Errore nel loop auto-retry IA (5 min): {e}")
-            await asyncio.sleep(30)
-
 def avvia_loop_auto_retry_ia():
-    asyncio.create_task(_loop_auto_retry_parser_ia())
+    """Disabilitato: la rielaborazione avviene solo su richiesta esplicita dell'utente."""
+    pass
 
 def is_cliente_mulnar(mittente: str) -> bool:
     """Verifica se il mittente o numero corrisponde a Mulnar."""

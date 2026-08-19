@@ -4,6 +4,7 @@ import base64
 import re
 import requests
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -158,12 +159,12 @@ async def _loop_sincronizzazione_periodica() -> None:
     while True:
         try:
             if not is_licenza_attiva():
-                add_whatsapp_log("⛔ Sincronizzazione WhatsApp in pausa: Licenza Software Sospesa.", "WARN")
+                pass
             elif WHATSAPP_STATE.get("stato_connessione") == "CONNESSO":
-                await sincronizza_chat_recenti_background()
+                await controlla_nuovi_messaggi_whatsapp()
         except Exception as e:
-            add_whatsapp_log(f"⚠️ Errore nel loop periodico: {e}", "WARN")
-        await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+            add_whatsapp_log(f"⚠️ Errore controllo messaggi 10s: {e}", "WARN")
+        await asyncio.sleep(10) # Controllo tassativo ogni 10 secondi
 
 def avvia_loop_sincronizzazione_periodica() -> None:
     global _sync_loop_task
@@ -341,22 +342,22 @@ def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
             return data["records"]
     return []
 
-async def sincronizza_chat_recenti_background() -> None:
-    add_whatsapp_log("📥 Avvio sincronizzazione automatica delle chat recenti (ultimi 2 giorni)...", "INFO")
-    
-    two_days_ago_timestamp = (datetime.now() - timedelta(days=2)).timestamp()
+async def controlla_nuovi_messaggi_whatsapp() -> None:
+    """Controlla le chat ogni 10s per identificare nuovi messaggi recenti non ancora elaborati (finestra ultimi 5 minuti)."""
+    if not is_licenza_attiva() or WHATSAPP_STATE.get("stato_connessione") != "CONNESSO":
+        return
+
+    # Finestra di sicurezza per i messaggi non ancora elaborati di oggi
+    recent_timestamp_limit = (datetime.now() - timedelta(hours=18)).timestamp()
 
     try:
-        res = requests.post(f"{EVOLUTION_URL}/chat/findChats/{INSTANCE_NAME}", json={}, headers=_req_headers(), timeout=15)
+        res = requests.post(f"{EVOLUTION_URL}/chat/findChats/{INSTANCE_NAME}", json={}, headers=_req_headers(), timeout=5)
         if res.status_code != 200:
             return
 
-        chats_raw = res.json()
-        chats = _estrai_lista_evolution(chats_raw, "chats")
+        chats = _estrai_lista_evolution(res.json(), "chats")
         if not chats:
             return
-
-        processed_count = 0
 
         for c in chats:
             remote_jid = c.get("remoteJid") or c.get("id")
@@ -364,23 +365,21 @@ async def sincronizza_chat_recenti_background() -> None:
                 continue
 
             msg_res = requests.post(
-                f"{EVOLUTION_URL}/chat/findMessages/{INSTANCE_NAME}", 
-                json={"where": {"key": {"remoteJid": remote_jid}}}, 
-                headers=_req_headers(), 
-                timeout=10
+                f"{EVOLUTION_URL}/chat/findMessages/{INSTANCE_NAME}",
+                json={"where": {"key": {"remoteJid": remote_jid}}, "limit": 5},
+                headers=_req_headers(),
+                timeout=5
             )
-            
             if msg_res.status_code != 200:
                 continue
 
-            messages_data = msg_res.json()
-            messages = _estrai_lista_evolution(messages_data, "messages")
+            messages = _estrai_lista_evolution(msg_res.json(), "messages")
             if not messages:
                 continue
 
             for msg in messages:
                 try:
-                    if msg.get("key", {}).get("fromMe") == True:
+                    if msg.get("key", {}).get("fromMe") is True:
                         continue
 
                     timestamp_raw = msg.get("messageTimestamp", 0)
@@ -389,11 +388,12 @@ async def sincronizza_chat_recenti_background() -> None:
                     except (TypeError, ValueError):
                         timestamp = 0
 
-                    if timestamp < two_days_ago_timestamp:
-                        continue 
+                    # Salta categoricamente i messaggi più vecchi di 5 minuti
+                    if timestamp < recent_timestamp_limit:
+                        continue
 
                     msg_id = msg.get("key", {}).get("id", "")
-                    if msg_id and await is_messaggio_elaborato(msg_id):
+                    if not msg_id or await is_messaggio_elaborato(msg_id):
                         continue
 
                     testo = ""
@@ -416,35 +416,30 @@ async def sincronizza_chat_recenti_background() -> None:
                     remote_jid_alt = key.get("remoteJidAlt", "")
                     phone_number = remote_jid_alt.split("@")[0] if remote_jid_alt else remote_jid.split("@")[0]
                     nome_finale = _trova_nome_in_rubrica_locale(phone_number)
-                    
                     if not nome_finale:
                         nome_finale = _estrai_nome_contatto(msg, phone_number)
-                        
                     if not nome_finale:
                         nome_finale = _forza_ricerca_nome_evolution(remote_jid, phone_number)
-                        
+
                     mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
                     data_ricezione_custom = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') if timestamp else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                    # Se l'ordine è già presente nel DB per quel mittente e testo, passa oltre
-                    if await ordine_esiste_in_db(mittente, testo, None):
-                        await segna_messaggio_elaborato(msg_id)
-                        continue
-
+                    # Segna subito come elaborato
                     await segna_messaggio_elaborato(msg_id)
-                    processed_count += 1
 
-                    add_whatsapp_log(f"📥 [Sync] Elaborazione messaggio di {mittente}: {testo[:50]}", "INFO")
-                    await _processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom)
-                    await asyncio.sleep(5.0)
-                except Exception as msg_err:
+                    add_whatsapp_log(f"📥 [Nuovo Messaggio 10s] Ricevuto da {mittente}: {testo[:50]}", "INFO")
+                    await _accoda_messaggio_utente(mittente, testo, is_vocal, msg, data_ricezione_custom)
+
+                except Exception:
                     continue
 
-        add_whatsapp_log(f"✅ Sincronizzazione storico completata. Analizzati {processed_count} messaggi recenti.", "SUCCESS")
         WHATSAPP_STATE["ultima_sincronizzazione_periodica"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 
-    except Exception as e:
-        add_whatsapp_log(f"⚠️ Errore sincronizzazione storico: {e}", "WARN")
+    except Exception:
+        pass
+
+async def sincronizza_chat_recenti_background() -> None:
+    await controlla_nuovi_messaggi_whatsapp()
 
 async def elabora_webhook_evolution(payload: dict) -> None:
     if not is_licenza_attiva():
@@ -678,6 +673,15 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
     lista_ordini = risultato_ia.get("ordini", [])
     if not lista_ordini:
         lista_ordini = [risultato_ia]
+
+    # Controlla se il parser di emergenza è entrato in azione
+    usato_fallback = any(ordine.get("is_fallback", False) for ordine in lista_ordini)
+
+    if usato_fallback:
+        logging.warning(f"⚠️ [Elaborazione Ordine] Ordine di {mittente} salvato dal Parser Locale di Emergenza!")
+        add_whatsapp_log(f"⚠️ [Parser Emergenza] Ordine di {mittente} salvato con parser locale (da verificare)", "WARN")
+    else:
+        logging.info(f"✨ [Elaborazione Ordine] Ordine di {mittente} elaborato con successo dall'IA!")
 
     for ord_singolo in lista_ordini:
         ord_singolo["timestamp_elaborazione"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
