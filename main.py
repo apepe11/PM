@@ -156,8 +156,15 @@ async def licenza_check_middleware(request: Request, call_next):
 class ProdottoItem(BaseModel):
     codice_articolo: str
     nome_articolo: Optional[str] = None
-    quantita: float
+    quantita: float = 1.0
     unita_di_misura: Optional[str] = "kg"
+    grammatura: Optional[Union[float, str]] = None
+    numero_lotto: Optional[str] = None
+    is_peso_fisso: Optional[bool] = None
+    peso_unitario_kg: Optional[float] = None
+
+    class Config:
+        extra = "allow"
 
 class OrdineCreate(BaseModel):
     mittente: str
@@ -165,10 +172,17 @@ class OrdineCreate(BaseModel):
     note_ordine: Optional[str] = ""
     data_consegna: Optional[str] = None
 
+    class Config:
+        extra = "allow"
+
 class OrdineUpdate(BaseModel):
+    mittente: Optional[str] = None
     prodotti: List[ProdottoItem]
     note_ordine: Optional[str] = ""
     data_consegna: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 @app.on_event("startup")
 async def startup_event():
@@ -371,6 +385,7 @@ async def update_ordine(id_ordine: int, payload: OrdineUpdate):
     prodotti_dict = [p.dict() for p in payload.prodotti]
     success = await aggiorna_ordine(
         id_ordine=id_ordine,
+        mittente=payload.mittente,
         prodotti=prodotti_dict,
         note=payload.note_ordine or "", 
         data_consegna=payload.data_consegna

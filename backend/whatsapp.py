@@ -393,6 +393,8 @@ async def sincronizza_chat_recenti_background() -> None:
                         continue 
 
                     msg_id = msg.get("key", {}).get("id", "")
+                    if msg_id and await is_messaggio_elaborato(msg_id):
+                        continue
 
                     testo = ""
                     is_vocal = False
@@ -434,7 +436,7 @@ async def sincronizza_chat_recenti_background() -> None:
 
                     add_whatsapp_log(f"📥 [Sync] Elaborazione messaggio di {mittente}: {testo[:50]}", "INFO")
                     await _processa_ordine_ia(mittente, testo, is_vocal, msg, data_ricezione_custom)
-                    await asyncio.sleep(1.5)
+                    await asyncio.sleep(5.0)
                 except Exception as msg_err:
                     continue
 
@@ -643,14 +645,11 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
             mime_type = media_info["mimeType"]
             add_whatsapp_log(f"⚡ Audio scaricato. Trascrizione IA in corso...", "AUDIO")
 
-    is_andrea_mittente = _is_titolare_andrea(mittente)
-    storico_di_oggi = "" if is_andrea_mittente else await get_storico_oggi(mittente)
     dt_msg = datetime.strptime(data_ricezione_custom, '%Y-%m-%d %H:%M:%S')
 
     risultato_ia = await ai_parser.parse_message(
         testo,
         client_name=mittente,
-        storico_oggi=storico_di_oggi,
         audio_data=audio_data,
         mime_type=mime_type,
         message_timestamp=dt_msg
@@ -693,7 +692,7 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
         cliente_finale = ord_singolo.get("cliente_id", mittente)
 
         async with DB_WRITE_LOCK:
-            if is_cancelled or (storico_di_oggi and not is_order and len(prodotti) == 0 and ("annull" in testo.lower() or "cancell" in testo.lower())):
+            if is_cancelled or (not is_order and len(prodotti) == 0 and ("annull" in testo.lower() or "cancell" in testo.lower())):
                 add_whatsapp_log(f"🚫 Ordine per {cliente_finale} ANNULLATO.", "WARN")
                 ord_singolo["is_order"] = False
                 ord_singolo["is_cancelled"] = True

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Printer, Pizza, Sparkles, CheckCircle2, MessageSquare, Search, Edit3, Trash2 } from 'lucide-react';
+import { Calendar, Printer, Pizza, Sparkles, CheckCircle2, MessageSquare, Search, Edit3, Trash2, Plus } from 'lucide-react';
 import { formatDateIT } from '../utils/dateUtils';
 
-export default function FiloniPizzeria({ selectedDate, setSelectedDate, onEditOrder, onDeleteOrder }) {
+export default function FiloniPizzeria({ selectedDate, setSelectedDate, onEditOrder, onDeleteOrder, onOpenNewOrderModal }) {
   const [clientiFiloni, setClientiFiloni] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -75,16 +75,29 @@ export default function FiloniPizzeria({ selectedDate, setSelectedDate, onEditOr
           </button>
         </div>
 
-        {/* Delicate PDF Button */}
-        <a
-          href={`/api/pdf/filoni?data=${selectedDate}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center space-x-2 px-3.5 py-1.5 rounded-lg bg-petruzzi-800 hover:bg-petruzzi-900 text-white text-xs font-bold transition text-decoration-none shadow-sm"
-        >
-          <Printer className="w-4 h-4" />
-          <span>Stampa Scheda Filoni PDF</span>
-        </a>
+        {/* Action Buttons */}
+        <div className="flex items-center space-x-2.5">
+          {onOpenNewOrderModal && (
+            <button
+              onClick={() => onOpenNewOrderModal(false)}
+              className="flex items-center space-x-2 px-3.5 py-1.5 rounded-lg bg-petruzzi-700 hover:bg-petruzzi-800 text-white text-xs font-black transition shadow-sm border border-petruzzi-800"
+            >
+              <Plus className="w-4 h-4 text-petruzzi-200" />
+              <span>➕ Aggiungi Ordine Filoni</span>
+            </button>
+          )}
+
+          {/* Delicate PDF Button */}
+          <a
+            href={`/api/pdf/filoni?data=${selectedDate}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center space-x-2 px-3.5 py-1.5 rounded-lg bg-petruzzi-800 hover:bg-petruzzi-900 text-white text-xs font-bold transition text-decoration-none shadow-sm"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Stampa Scheda Filoni PDF</span>
+          </a>
+        </div>
 
       </div>
 
@@ -107,6 +120,15 @@ export default function FiloniPizzeria({ selectedDate, setSelectedDate, onEditOr
             <Pizza className="w-12 h-12 text-petruzzi-600 mx-auto mb-3" />
             <h3 className="text-lg font-bold text-petruzzi-800">Nessuna pizzeria o ordine filoni per questa data</h3>
             <p className="text-sm text-petruzzi-600 mt-1">Gli ordini contenenti filoni di mozzarella appariranno qui organizzati per cliente.</p>
+            {onOpenNewOrderModal && (
+              <button
+                onClick={() => onOpenNewOrderModal(false)}
+                className="mt-4 inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-petruzzi-800 hover:bg-petruzzi-900 text-white text-xs font-bold transition shadow-md"
+              >
+                <Plus className="w-4 h-4 text-petruzzi-200" />
+                <span>➕ Aggiungi Ordine Filoni Manuale</span>
+              </button>
+            )}
           </div>
         ) : (
           filteredClienti.map((cli, idx) => (

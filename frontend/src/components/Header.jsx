@@ -65,17 +65,6 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-petruzzi-700' : ''}`} />
             </button>
 
-            {/* Rielabora Tutti Ordini IA Button */}
-            {onReprocessAll && (
-              <button
-                onClick={onReprocessAll}
-                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold text-xs border border-amber-300 transition shadow-sm"
-                title="Rielabora ordini delle ultime 48 ore con l'IA"
-              >
-                <span>🧠 Rielabora IA (48h)</span>
-              </button>
-            )}
-
            {/* Navigation Dropdown Menu */}
               <div className="relative">
                 <select

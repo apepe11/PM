@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 import aiosqlite
@@ -10,6 +11,8 @@ from backend.db import (
     registra_broadcast_log,
     DB_FILE
 )
+
+BROADCAST_POLL_INTERVAL_SECONDS = int(os.environ.get("BROADCAST_POLL_INTERVAL_SECONDS", "15"))
 
 async def invia_a_contatto(destinatario: str, messaggio: str, id_sched: int = 0) -> bool:
     """Invia un messaggio WhatsApp tramite Evolution API e ne registra il log."""
@@ -107,7 +110,7 @@ async def esegui_task_schedulato_ora(id_sched: int) -> bool:
 
 async def avvia_demone_broadcast():
     """Demone schedulatore in background ad alta affidabilità per WhatsApp Evolution API."""
-    logging.info("🚀 Demone Schedulatore Broadcast WhatsApp avviato (Polling ogni 30s)...")
+    logging.info(f"🚀 Demone Schedulatore Broadcast WhatsApp avviato (Polling ogni {BROADCAST_POLL_INTERVAL_SECONDS}s)...")
     
     while True:
         try:
@@ -146,4 +149,4 @@ async def avvia_demone_broadcast():
         except Exception as e:
             logging.error(f"⚠️ Eccezione nel demone broadcast: {e}")
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(BROADCAST_POLL_INTERVAL_SECONDS)

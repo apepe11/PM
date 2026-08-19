@@ -72,12 +72,20 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
             <h3 className="font-black text-petruzzi-950 text-xl tracking-tight leading-snug">
               {ord.mittente ? ord.mittente.split('(')[0].trim() : ''}
             </h3> 
-            {ord.da_verificare_manualmente && (
-              <span className="lg:mt-2 inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-200 text-amber-950 text-[11px] font-black uppercase border border-amber-400 shadow-sm animate-pulse">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-800" />
-                <span>Da Verificare</span>
-              </span>
-            )}
+            
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              {ord.fonte_parser === 'LOCALE' || ord.elaborato_da === 'PARSER_LOCALE' || ord.da_verificare_manualmente ? (
+                <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 text-[10px] font-black uppercase border border-amber-400 shadow-sm animate-pulse">
+                  <AlertTriangle className="w-3 h-3 text-amber-700" />
+                  <span>⚠️ Parser Locale (Da Verificare)</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-black uppercase border border-emerald-300 shadow-sm">
+                  <Sparkles className="w-3 h-3 text-emerald-700" />
+                  <span>🤖 Estratto con IA</span>
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2 mt-3">
@@ -246,21 +254,26 @@ const OrderCard = ({ ord, onConfirmOrder, onEditOrder, onDeleteOrder, deleteConf
             href={`/api/pdf/ordine/${ord.id}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center py-2 px-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 font-extrabold text-xs border border-amber-300 transition"
+            className="flex items-center justify-center py-2 px-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 font-extrabold text-xs border border-amber-300 transition shadow-sm"
           >
             <span>📄 PDF</span>
           </a>
 
           <button
+            type="button"
             onClick={() => onEditOrder(ord)}
-            className="flex items-center justify-center py-2 px-2 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-black text-xs transition shadow-sm"
+            className="flex items-center justify-center space-x-1 py-2 px-2 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-black text-xs transition shadow-sm border border-amber-900"
+            title="Aggiusta / Modifica Ordine"
           >
-            <Edit3 className="w-4 h-4 text-amber-200" />
+            <Edit3 className="w-3.5 h-3.5 text-amber-200" />
+            <span>Aggiusta</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setDeleteConfirmId(ord.id)}
-            className="flex items-center justify-center py-2 px-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-800 font-extrabold text-xs border border-red-300 transition"
+            className="flex items-center justify-center py-2 px-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-800 font-extrabold text-xs border border-red-300 transition shadow-sm"
+            title="Elimina Ordine"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -369,9 +382,12 @@ export default function OrdiniSole({ ordini, selectedDate, setSelectedDate, onEd
             <span>Stampa Scheda Sole PDF</span>
           </a>
           {onOpenNewOrderModal && (
-            <button onClick={onOpenNewOrderModal} className="flex items-center space-x-2 px-3.5 py-1.5 rounded-lg bg-petruzzi-800 hover:bg-petruzzi-900 text-white text-xs font-bold transition transform active:scale-95 shadow-sm">
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span>➕ Aggiungi Ordine</span>
+            <button
+              onClick={() => onOpenNewOrderModal(true)}
+              className="flex items-center space-x-2 px-3.5 py-1.5 rounded-lg bg-amber-800 hover:bg-amber-900 text-white text-xs font-black transition transform active:scale-95 shadow-sm border border-amber-900"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>☀️ ➕ Aggiungi Ordine Sole 365</span>
             </button>
           )}
         </div>

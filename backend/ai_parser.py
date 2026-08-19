@@ -9,49 +9,23 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple, Union, Any
 
 from dotenv import load_dotenv
-from groq import AsyncGroq
+import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-# Silenziamo i log interni della libreria HTTP che stampano gli errori 429/200 di default
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY non impostata. Creare un file .env con GROQ_API_KEY=...")
-
-# Liste di priorità per auto-selezione e auto-aggiornamento autonomo dei modelli Groq (esclusivamente 8B / leggeri per Free Tier)
-PREFERRED_PRIMARY_MODELS = [
-    "llama3-8b-8192",
-    "llama-3.1-8b-instant",
-    "llama-3.2-3b-preview",
-    "llama-3.2-1b-preview"
-]
-
-PREFERRED_FALLBACK_MODELS = [
-    "llama-3.1-8b-instant",
-    "llama3-8b-8192",
-    "llama-3.2-3b-preview"
-]
-
-PREFERRED_AUDIO_MODELS = [
-    "whisper-large-v3",
-    "whisper-large-v3-turbo"
-]
-
-# Modello principale forzato per evitare il rate limit del piano gratuito
-GROQ_MODEL = "llama3-8b-8192"
-
-# Modello di riserva (sempre leggero)
-GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant"
-
-# Modello Audio (invariato)
-GROQ_AUDIO_MODEL = "whisper-large-v3"
-
-GROQ_LOCK = asyncio.Lock()
-LAST_GROQ_REQUEST_TIME = 0.0
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY non impostata. Creare un file .env con GEMINI_API_KEY=...")
+# Configurazione del client Google Gemini
+genai.configure(api_key=GEMINI_API_KEY) # type: ignore
+GEMINI_MODEL = "gemini-3.6-flash"
+GEMINI_LOCK = asyncio.Lock()
+LAST_GEMINI_REQUEST_TIME = 0.0
 
 def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_name: str = "") -> Tuple[str, str]:
     if ora_attuale is None:
@@ -102,81 +76,7 @@ class AIParser:
                 self.synonyms_map[cod_art] = item.get("s", "")
                 
         self.client_rules = self._load_json(particolarita_path, [])
-        
-        self.client_groq = AsyncGroq(api_key=GROQ_API_KEY, max_retries=0)
-        self.current_model = GROQ_MODEL
-        self.fallback_model = GROQ_FALLBACK_MODEL
-        self.audio_model = GROQ_AUDIO_MODEL
-        self.last_discovery_time = 0.0
-        self.decommissioned_models = set()
-
-    async def auto_discover_models(self, force: bool = False, exclude_model: Optional[str] = None):
-        """Rileva automaticamente i modelli attivi e supportati dall'API Groq in tempo reale."""
-        global GROQ_MODEL, GROQ_FALLBACK_MODEL, GROQ_AUDIO_MODEL
-        now = time.time()
-        if exclude_model:
-            self.decommissioned_models.add(exclude_model)
-
-        # Cache di 1 ora per evitare chiamate ripetute a ogni messaggio
-        if not force and not exclude_model and (now - self.last_discovery_time < 3600.0) and GROQ_MODEL not in self.decommissioned_models:
-            return
-
-        try:
-            models_res = await self.client_groq.models.list()
-            active_ids = {m.id for m in models_res.data if getattr(m, "active", True)}
-
-            # 1. Selezione Modello Principale (Text - Esclusivamente modelli leggeri 8B)
-            best_primary = None
-            for cand in PREFERRED_PRIMARY_MODELS:
-                if cand in active_ids and cand not in self.decommissioned_models:
-                    best_primary = cand
-                    break
-            if not best_primary:
-                for m_id in active_ids:
-                    m_lower = m_id.lower()
-                    if m_id not in self.decommissioned_models and "whisper" not in m_lower and "guard" not in m_lower and "70b" not in m_lower and "120b" not in m_lower:
-                        best_primary = m_id
-                        break
-
-            # 2. Selezione Modello Fallback (Text - Esclusivamente modelli leggeri 8B)
-            best_fallback = None
-            for cand in PREFERRED_FALLBACK_MODELS:
-                if cand in active_ids and cand != best_primary and cand not in self.decommissioned_models:
-                    best_fallback = cand
-                    break
-            if not best_fallback:
-                for m_id in active_ids:
-                    m_lower = m_id.lower()
-                    if m_id != best_primary and m_id not in self.decommissioned_models and "whisper" not in m_lower and "guard" not in m_lower and "70b" not in m_lower and "120b" not in m_lower:
-                        best_fallback = m_id
-                        break
-
-            # 3. Selezione Modello Audio (Whisper)
-            best_audio = None
-            for cand in PREFERRED_AUDIO_MODELS:
-                if cand in active_ids:
-                    best_audio = cand
-                    break
-
-            if best_primary:
-                GROQ_MODEL = best_primary
-                self.current_model = best_primary
-            if best_fallback:
-                GROQ_FALLBACK_MODEL = best_fallback
-                self.fallback_model = best_fallback
-            if best_audio:
-                GROQ_AUDIO_MODEL = best_audio
-                self.audio_model = best_audio
-
-            self.last_discovery_time = now
-            logging.info(f"🤖 [Auto-Discovery Groq] Modelli autonomi aggiornati -> Primario: {GROQ_MODEL} | Fallback: {GROQ_FALLBACK_MODEL} | Audio: {GROQ_AUDIO_MODEL}")
-        except Exception as e:
-            logging.warning(f"⚠️ Errore durante l'auto-discovery modelli Groq: {e}")
-
-    def reload_client_rules(self):
-        particolarita_path = get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
-        self.client_rules = self._load_json(particolarita_path, [])
-        logging.info(f"🔄 Regole clienti ricaricate in memoria ({len(self.client_rules)} clienti).")
+        self.current_model = GEMINI_MODEL
 
     def _load_json(self, file_path: str, default_value: Any) -> Any:
         if os.path.exists(file_path):
@@ -315,7 +215,7 @@ class AIParser:
 
         SCHEMA JSON DA RISPETTARE:
         {{
-        "testo_trascritto": "",
+        "testo_trascritto": "Se il messaggio conteneva un audio, scrivi qui la trascrizione parola per parola del cliente. Altrimenti lascia vuoto.",
         "ordini": [{{
             "is_order": true,
             "is_cancelled": false,
@@ -328,43 +228,15 @@ class AIParser:
         }}"""
 
     async def parse_message(self, text_to_parse: str, client_name: str = "Cliente", storico_oggi: str = "", audio_data: Optional[str] = None, mime_type: str = "audio/ogg", message_timestamp: Optional[datetime] = None):
-        global LAST_GROQ_REQUEST_TIME
-        
-        # [AUTONOMOUS AI]: Auto-discovery e auto-selezione dinamica dei modelli Groq attivi
-        await self.auto_discover_models()
-        self.current_model = GROQ_MODEL
+        global LAST_GEMINI_REQUEST_TIME
         
         if message_timestamp is None:
             message_timestamp = datetime.now()
-            
-        testo_trascritto_vocale = ""
 
-        if audio_data:
-            try:
-                logging.info(f"🎙️ Avvio trascrizione Groq Whisper per {client_name} (Modello: {GROQ_AUDIO_MODEL})...")
-                audio_bytes = base64.b64decode(audio_data)
-                
-                transcription = await self.client_groq.audio.transcriptions.create(
-                  file=("audio.ogg", audio_bytes),
-                  model=GROQ_AUDIO_MODEL,
-                  response_format="json"
-                )
-                
-                testo_trascritto_vocale = transcription.text
-                logging.info(f"🎙️ Trascrizione completata per {client_name}.")
-                
-                text_to_parse = f"{text_to_parse}\n[TRASCRIZIONE VOCALE]: {testo_trascritto_vocale}"
-            except Exception as e:
-                err_a = str(e).lower()
-                if "model_decommissioned" in err_a or "model_not_found" in err_a or "404" in err_a or "400" in err_a:
-                    logging.warning(f"🎙️ Modello audio {GROQ_AUDIO_MODEL} obsoleto/non valido. Auto-aggiornamento...")
-                    await self.auto_discover_models(force=True, exclude_model=GROQ_AUDIO_MODEL)
-
-        testo_per_check = testo_trascritto_vocale if audio_data else text_to_parse
-
-        if self.is_courtesy_or_non_order(testo_per_check):
+        # Check iniziale messaggi di cortesia
+        if not audio_data and self.is_courtesy_or_non_order(text_to_parse):
             return {
-                "testo_trascritto": testo_trascritto_vocale,
+                "testo_trascritto": "",
                 "ordini": [{
                     "is_order": False,
                     "cliente_id": client_name,
@@ -374,61 +246,68 @@ class AIParser:
                 }]
             }
 
-        if audio_data and testo_trascritto_vocale and len(testo_trascritto_vocale.strip()) < 8:
-            return {
-                "testo_trascritto": testo_trascritto_vocale,
-                "ordini": [{
-                    "is_order": False,
-                    "cliente_id": client_name,
-                    "prodotti": [],
-                    "note_ordine": "Vocale trascritto troppo corto/non chiaro.",
-                    "da_verificare_manualmente": True
-                }]
-            }
-
         if storico_oggi and len(storico_oggi) > 150:
             storico_oggi = "[..]" + storico_oggi[-150:]
 
         max_attempts = 3
 
         for attempt in range(max_attempts):
-            async with GROQ_LOCK:
+            async with GEMINI_LOCK:
                 now = time.time()
-                elapsed = now - LAST_GROQ_REQUEST_TIME
-                # Pausa obbligatoria aumentata a 40 secondi per preservare i token gratuiti
-                min_pacing = 40.0 
+                elapsed = now - LAST_GEMINI_REQUEST_TIME
+                # Pacing Gemini: 10 RPM max = 1 richiesta ogni 6 secondi per la massima sicurezza.
+                min_pacing = 6.0 
                 if elapsed < min_pacing:
                     await asyncio.sleep(min_pacing - elapsed)
-                LAST_GROQ_REQUEST_TIME = time.time()
+                LAST_GEMINI_REQUEST_TIME = time.time()
 
                 try:
                     prompt_sistema = self.build_system_instruction(client_name, message_timestamp=message_timestamp)
                     
+                    # Preparazione del contenuto per Gemini
+                    contents = []
+                    
+                    prompt_utente = ""
                     if storico_oggi:
-                        prompt_utente = f"STORICO OGGI ({client_name}):\n{storico_oggi}\nNUOVO MSG:\n\"{text_to_parse}\""
+                        prompt_utente += f"STORICO OGGI ({client_name}):\n{storico_oggi}\nNUOVO MSG:\n"
+                    
+                    if audio_data:
+                        prompt_utente += f"Ascolta l'audio allegato inviato da {client_name} per estrarre l'ordine. Inserisci la trascrizione fedele nel campo 'testo_trascritto'."
+                        # Gemini supporta i base64 nativamente per l'audio!
+                        contents.append({
+                            "mime_type": mime_type,
+                            "data": audio_data
+                        })
                     else:
-                        prompt_utente = f"Msg ({client_name}):\n\"{text_to_parse}\""
+                        prompt_utente += f"\"{text_to_parse}\""
+                        
+                    contents.append(prompt_utente)
 
-                    completion = await self.client_groq.chat.completions.create(
-                        model=self.current_model,
-                        messages=[
-                            {"role": "system", "content": prompt_sistema},
-                            {"role": "user", "content": prompt_utente}
-                        ],
-                        temperature=0.0
+                    # Inizializziamo il modello con le istruzioni di sistema e forziamo il JSON
+                    model = genai.GenerativeModel( # type: ignore
+                        model_name=self.current_model,
+                        system_instruction=prompt_sistema,
+                        generation_config={
+                            "response_mime_type": "application/json",
+                            "temperature": 0.0
+                        }
                     )
                     
-                    raw_text = (completion.choices[0].message.content or "").strip()
-                    # Rimuove eventuali tag di reasoning <think>...</think>
-                    raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
+                    logging.info(f"🚀 Inviando richiesta a Gemin per {client_name} (Attempt {attempt+1})...")
                     
+                    # Chiamata Asincrona a Google Gemini
+                    response = await model.generate_content_async(contents)
+                    
+                    raw_text = response.text.strip()
+                    
+                    # Essendo JSON forzato, dovrebbe essere perfetto, ma facciamo un sanity check
                     match_json = re.search(r'(\{.*\})', raw_text, re.DOTALL)
                     if match_json:
                         raw_text = match_json.group(1)
 
                     parsed_json = json.loads(raw_text)
                     
-                    testo_trascritto = parsed_json.get("testo_trascritto") or testo_trascritto_vocale
+                    testo_trascritto = parsed_json.get("testo_trascritto", "")
                     
                     ordini_array = parsed_json.get("ordini", [])
                     if not ordini_array and "prodotti" in parsed_json:
@@ -488,22 +367,15 @@ class AIParser:
                         "ordini": ordini_array
                     }
 
+                except ResourceExhausted as e:
+                    logging.warning(f"⚠️ Rate Limit Gemini raggiunto. Attesa di 10 secondi...")
+                    await asyncio.sleep(10.0)
+                    if attempt == max_attempts - 1:
+                        return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)
+                        
                 except Exception as e:
-                    err_str = str(e).lower()
-                    if "model_decommissioned" in err_str or "model_not_found" in err_str or "does not exist" in err_str or ("400" in err_str and "model" in err_str) or "404" in err_str:
-                        logging.warning(f"⚠️ Modello {self.current_model} dismesso/non disponibile su Groq. Auto-selezione autonoma del miglior modello attivo...")
-                        await self.auto_discover_models(force=True, exclude_model=self.current_model)
-                        self.current_model = GROQ_MODEL
-                        await asyncio.sleep(0.5)
-                        continue
-                    elif "rate limit" in err_str or "429" in err_str:
-                        if self.current_model == GROQ_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
-                            self.current_model = GROQ_FALLBACK_MODEL
-                            logging.info(f"🔄 Commutazione automatica su modello di riserva {self.current_model} per 429 Rate Limit.")
-                        else:
-                            await asyncio.sleep(60.0)
-                    else:
-                        await asyncio.sleep(1.0)
+                    logging.error(f"⚠️ Errore Gemini API: {e}")
+                    await asyncio.sleep(1.0)
                     
                     if attempt == max_attempts - 1:
                         return self.fallback_local_parse(text_to_parse, client_name, message_timestamp)

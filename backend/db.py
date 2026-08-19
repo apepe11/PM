@@ -264,12 +264,12 @@ async def get_storico_oggi(mittente: str) -> str:
 
 async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str] = None) -> bool:
     async with get_db_connection() as db:
-        clean_text = testo.replace("🎙️ [MESSAGGIO VOCALE]", "").strip()[:30]
-        if not clean_text:
+        clean_text = testo.replace("🎙️ [MESSAGGIO VOCALE]", "").replace("🎙️ [VOCALE TRASCRITTO]:", "").strip()
+        if not clean_text or len(clean_text) < 4:
             return False
         cursor = await db.execute(
-            "SELECT id FROM ordini WHERE mittente = ? AND (testo_originale LIKE ? OR testo_originale = ?)",
-            (mittente, f"%{clean_text}%", testo)
+            "SELECT id FROM ordini WHERE (testo_originale = ? OR testo_originale LIKE ?)",
+            (testo, f"%{clean_text}%")
         )
         row = await cursor.fetchone()
         return bool(row)
@@ -290,37 +290,39 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             dati_json["data_consegna"] = corrected_date
             dati_estratti = json.dumps(dati_json, ensure_ascii=False)
 
-        row = await _trova_ordine_esistente_per_data(db, mittente_finale, corrected_date)
+        # Se l'ordine è un annullamento esplicito, aggiorna l'ordine esistente
+        if dati_json.get("is_cancelled") or dati_json.get("stato_ordine") == "ANNULLATO":
+            row = await _trova_ordine_esistente_per_data(db, mittente_finale, corrected_date)
+            if row:
+                target_id = row[0]
+                await db.execute(
+                    "UPDATE ordini SET testo_originale = ?, dati_estratti_ia = ?, data_ricezione = ? WHERE id = ?",
+                    (nuovo_messaggio, dati_estratti, now_str, target_id)
+                )
+                await db.commit()
+                return
 
-        target_id = None
-        storico_precedente = ""
-        if row:
-            target_id, storico_precedente = row[0], row[1]
-
-        if target_id:
-            def normalize_str(s):
-                return re.sub(r'\W+', '', s).lower()
-
-            norm_nuovo = normalize_str(nuovo_messaggio)
-            norm_storico = normalize_str(storico_precedente)
-
-            if norm_nuovo in norm_storico:
-                testo_combinato = storico_precedente
-            elif norm_storico in norm_nuovo:
-                testo_combinato = nuovo_messaggio
-            else:
-                testo_combinato = f"{storico_precedente}\n[Integrazione/Correzione]: {nuovo_messaggio}"
-            
-            await db.execute(
-                "UPDATE ordini SET testo_originale = ?, dati_estratti_ia = ?, data_ricezione = ? WHERE id = ?",
-                (testo_combinato, dati_estratti, now_str, target_id)
+        # DEDUPLICAZIONE RIGOROSA ANTI-DOPPIONI: Se lo stesso identico messaggio/ordine esiste già, aggiorna i dati senza duplicare la scheda
+        clean_check = nuovo_messaggio.replace("🎙️ [MESSAGGIO VOCALE]", "").replace("🎙️ [VOCALE TRASCRITTO]:", "").strip()
+        if len(clean_check) >= 4:
+            cursor = await db.execute(
+                "SELECT id FROM ordini WHERE (mittente = ? OR mittente = ?) AND (testo_originale = ? OR testo_originale LIKE ?)",
+                (mittente_finale, mittente, nuovo_messaggio, f"%{clean_check}%")
             )
-        else:
-            await db.execute(
-                "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
-                (mittente_finale, nuovo_messaggio, dati_estratti, now_str)
-            )
-            
+            existing_row = await cursor.fetchone()
+            if existing_row:
+                await db.execute(
+                    "UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?",
+                    (dati_estratti, existing_row[0])
+                )
+                await db.commit()
+                return
+
+        # INSERISCE COME NUOVO ORDINE SE NON È UN DUPLICATO
+        await db.execute(
+            "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
+            (mittente_finale, nuovo_messaggio, dati_estratti, now_str)
+        )
         await db.commit()
 
 def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
@@ -597,16 +599,28 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
 async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
     if not data_consegna:
         data_consegna = await get_data_attiva()
+    else:
+        norm_data = await normalize_data_consegna(data_consegna)
+        if norm_data:
+            data_consegna = norm_data
     
+    # Riempi nome_articolo da catalogo se mancante
+    for p in prodotti:
+        cod = p.get("codice_articolo")
+        if cod in PRODOTTI_MAP and not p.get("nome_articolo"):
+            p["nome_articolo"] = PRODOTTI_MAP[cod]["nome"]
+
     dati_ia = {
         "is_order": True,
+        "stato_ordine": "IN_ATTESA",
+        "stato_confezionamento": "DA_CONFEZIONARE",
         "data_consegna": data_consegna,
         "prodotti": prodotti,
         "note_ordine": note,
         "da_verificare_manualmente": False,
         "cliente_id": mittente
     }
-    testo_orig = f"[Inserimento Manuale Dashboard] {note}"
+    testo_orig = f"[Inserimento Manuale Dashboard] {note}".strip()
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     async with get_db_connection() as db:
@@ -617,25 +631,44 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
         await db.commit()
         return cursor.lastrowid
 
-async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
+async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_consegna: Optional[str] = None, mittente: Optional[str] = None):
     async with get_db_connection() as db:
         cursor = await db.execute("SELECT mittente, testo_originale, dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
         if not row:
             return False
         
-        _, _, dati_ia_raw = row
+        old_mittente, _, dati_ia_raw = row
         dati_parsed = parse_dati_estratti_ia(dati_ia_raw)
 
-        dati_parsed["prodotti"] = prodotti
-        if note:
+        # Riempi nome_articolo da catalogo se mancante e normalizza quantita
+        cleaned_prodotti = []
+        for p in prodotti:
+            cod = p.get("codice_articolo")
+            nome = p.get("nome_articolo")
+            if cod in PRODOTTI_MAP and not nome:
+                p["nome_articolo"] = PRODOTTI_MAP[cod]["nome"]
+            try:
+                p["quantita"] = float(str(p.get("quantita", 1.0)).replace(',', '.'))
+            except (ValueError, TypeError):
+                p["quantita"] = 1.0
+            cleaned_prodotti.append(p)
+
+        dati_parsed["prodotti"] = cleaned_prodotti
+        if note is not None:
             dati_parsed["note_ordine"] = note
         if data_consegna:
-            dati_parsed["data_consegna"] = data_consegna
+            norm_data = await normalize_data_consegna(data_consegna)
+            dati_parsed["data_consegna"] = norm_data or data_consegna
+
+        new_mittente = (mittente or old_mittente or "").strip()
+        dati_parsed["cliente_id"] = new_mittente
+        dati_parsed["is_order"] = True
+        dati_parsed["da_verificare_manualmente"] = False
 
         await db.execute(
-            "UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?",
-            (json.dumps(dati_parsed, ensure_ascii=False), id_ordine)
+            "UPDATE ordini SET mittente = ?, dati_estratti_ia = ? WHERE id = ?",
+            (new_mittente, json.dumps(dati_parsed, ensure_ascii=False), id_ordine)
         )
         await db.commit()
         return True

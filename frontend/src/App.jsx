@@ -113,18 +113,25 @@ export default function App() {
     return () => clearInterval(interval);
   }, [selectedDate]);
 
+  const [isSoleModal, setIsSoleModal] = useState(false);
+
   const showToast = (text, type = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  const handleOpenNewOrderModal = () => {
+  const handleOpenNewOrderModal = (isSole = false) => {
     setEditingOrder(null);
+    setIsSoleModal(isSole === true || activeTab === 'sole');
     setIsModalOpen(true);
   };
 
   const handleOpenEditOrderModal = (ord) => {
     setEditingOrder(ord);
+    const mitt = (ord?.mittente || '').toLowerCase();
+    const note = (ord?.note_ordine || '').toLowerCase();
+    const isSole = mitt.includes('sole') || mitt.includes('365') || note.includes('sole') || note.includes('365');
+    setIsSoleModal(isSole);
     setIsModalOpen(true);
   };
 
@@ -135,6 +142,7 @@ export default function App() {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            mittente: orderData.mittente,
             prodotti: orderData.prodotti,
             note_ordine: orderData.note_ordine,
             data_consegna: orderData.data_consegna
@@ -142,7 +150,12 @@ export default function App() {
         });
         if (res.ok) {
           showToast('Ordine aggiornato con successo!');
+          if (orderData.data_consegna && orderData.data_consegna !== selectedDate) {
+            setSelectedDate(orderData.data_consegna);
+          }
           fetchDashboardData();
+        } else {
+          showToast("Errore durante l'aggiornamento dell'ordine", 'error');
         }
       } else {
         const res = await fetch(`${API_BASE}/ordini`, {
@@ -156,8 +169,13 @@ export default function App() {
           })
         });
         if (res.ok) {
-          showToast('Nuovo ordine manuale salvato!');
+          showToast('Nuovo ordine manuale salvato con successo!');
+          if (orderData.data_consegna && orderData.data_consegna !== selectedDate) {
+            setSelectedDate(orderData.data_consegna);
+          }
           fetchDashboardData();
+        } else {
+          showToast("Errore durante il salvataggio dell'ordine", 'error');
         }
       }
     } catch (e) {
@@ -274,6 +292,7 @@ export default function App() {
             setSelectedDate={setSelectedDate}
             onEditOrder={handleOpenEditOrderModal}
             onDeleteOrder={handleDeleteOrder}
+            onOpenNewOrderModal={handleOpenNewOrderModal}
           />
         )}
 
@@ -286,6 +305,7 @@ export default function App() {
             onEditOrder={handleOpenEditOrderModal}
             onDeleteOrder={handleDeleteOrder}
             onConfirmOrder={handleConfirmOrderInline}
+            onOpenNewOrderModal={handleOpenNewOrderModal}
           />
         )}
 
@@ -333,6 +353,8 @@ export default function App() {
         onSave={handleSaveOrder}
         editingOrder={editingOrder}
         prodottiCatalogo={prodottiCatalogo}
+        selectedDate={selectedDate}
+        isSoleMode={isSoleModal}
       />
 
       {isPrintModalOpen && (
