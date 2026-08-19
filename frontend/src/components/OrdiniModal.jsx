@@ -28,11 +28,12 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
   const [clientiRegistrati, setClientiRegistrati] = useState([]);
   const [catalogo, setCatalogo] = useState(prodottiCatalogo || []);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [prodotti, setProdotti] = useState([
     { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg', grammatura: '', numero_lotto: '' }
   ]);
 
-  // Carica catalogo se non passato come prop
+  // Carica catalogo
   useEffect(() => {
     if (prodottiCatalogo && prodottiCatalogo.length > 0) {
       setCatalogo(prodottiCatalogo);
@@ -42,9 +43,9 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
         .then(data => setCatalogo(data))
         .catch(err => console.error("Errore fetch catalogo:", err));
     }
-  }, [prodottiCatalogo, isOpen]);
+  }, [prodottiCatalogo]);
 
-  // Carica rubrica clienti
+  // Carica rubrica clienti una volta sola all'avvio o all'apertura
   useEffect(() => {
     const fetchClienti = async () => {
       try {
@@ -66,7 +67,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
       }
     };
 
-    if (isOpen) {
+    if (isOpen && clientiRegistrati.length === 0) {
       fetchClienti();
     }
   }, [isOpen]);
@@ -89,66 +90,84 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
     return lista;
   }, [clientiRegistrati]);
 
-  // Sincronizza stato form all'apertura o al cambio di editingOrder/isSoleMode
+  // Inizializza il form SOLO all'apertura del modal o al cambio esplicito di editingOrder
+  const prevIsOpenRef = React.useRef(false);
+  const prevOrderIdRef = React.useRef(null);
+
   useEffect(() => {
-    if (editingOrder) {
-      const isSole = isSoleOrder(editingOrder);
-      setIsSoleSelection(isSole);
+    const isJustOpened = isOpen && !prevIsOpenRef.current;
+    const isOrderChanged = isOpen && editingOrder?.id !== prevOrderIdRef.current;
 
-      const mitt = (editingOrder.mittente || '').trim();
-      const currentList = isSole ? listaPuntiSole : clientiRegistrati;
-      
-      const matchInDb = currentList.find(c => {
-        const cNome = (c.nome || '').toLowerCase().trim();
-        const mLower = mitt.toLowerCase();
-        if (cNome === mLower) return true;
-        if (c.telefono && mitt.includes(c.telefono.replace(/\+/g, '').trim())) return true;
-        if (cNome.length >= 4 && (mLower.includes(cNome) || cNome.includes(mLower))) return true;
-        return false;
-      });
-      
-      if (matchInDb) {
-        setIsNuovoCliente(false);
-        setMittenteSelect(matchInDb.nome);
-        setMittenteInput('');
+    if (isJustOpened || isOrderChanged) {
+      setIsSaving(false);
+      setErrorMessage('');
+
+      if (editingOrder) {
+        const isSole = isSoleOrder(editingOrder);
+        setIsSoleSelection(isSole);
+
+        const mitt = (editingOrder.mittente || '').trim();
+        const currentList = isSole ? listaPuntiSole : clientiRegistrati;
+        
+        const matchInDb = currentList.find(c => {
+          const cNome = (c.nome || '').toLowerCase().trim();
+          const mLower = mitt.toLowerCase();
+          if (cNome === mLower) return true;
+          if (c.telefono && mitt.includes(c.telefono.replace(/\+/g, '').trim())) return true;
+          if (cNome.length >= 4 && (mLower.includes(cNome) || cNome.includes(mLower))) return true;
+          return false;
+        });
+        
+        if (matchInDb) {
+          setIsNuovoCliente(false);
+          setMittenteSelect(matchInDb.nome);
+          setMittenteInput('');
+        } else {
+          setIsNuovoCliente(true);
+          setMittenteInput(mitt);
+          setMittenteSelect('');
+        }
+
+        setDataConsegna(editingOrder.data_consegna || selectedDate || new Date().toISOString().split('T')[0]);
+        setNote(editingOrder.note_ordine || '');
+
+        if (editingOrder.prodotti && editingOrder.prodotti.length > 0) {
+          setProdotti(editingOrder.prodotti.map(p => ({
+            codice_articolo: p.codice_articolo || 'FIORDPE',
+            nome_articolo: p.nome_articolo || p.codice_articolo || '',
+            quantita: p.quantita !== undefined ? p.quantita.toString() : "1",
+            unita_di_misura: p.unita_di_misura || 'kg',
+            grammatura: p.grammatura || '',
+            numero_lotto: p.numero_lotto || editingOrder.numero_lotto || ''
+          })));
+        } else {
+          setProdotti([
+            { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg', grammatura: '', numero_lotto: '' }
+          ]);
+        }
       } else {
-        setIsNuovoCliente(true);
-        setMittenteInput(mitt);
-        setMittenteSelect('');
-      }
+        setIsSoleSelection(isSoleMode);
+        setIsNuovoCliente(false);
+        setMittenteInput('');
+        setDataConsegna(selectedDate || new Date().toISOString().split('T')[0]);
+        setNote('');
+        setProdotti([
+          { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg', grammatura: '', numero_lotto: '' }
+        ]);
 
-      setDataConsegna(editingOrder.data_consegna || selectedDate || new Date().toISOString().split('T')[0]);
-      setNote(editingOrder.note_ordine || '');
-      setErrorMessage('');
-
-      if (editingOrder.prodotti && editingOrder.prodotti.length > 0) {
-        setProdotti(editingOrder.prodotti.map(p => ({
-          codice_articolo: p.codice_articolo || 'FIORDPE',
-          nome_articolo: p.nome_articolo || p.codice_articolo || '',
-          quantita: p.quantita !== undefined ? p.quantita.toString() : "1",
-          unita_di_misura: p.unita_di_misura || 'kg',
-          grammatura: p.grammatura || '',
-          numero_lotto: p.numero_lotto || editingOrder.numero_lotto || ''
-        })));
-      }
-    } else {
-      setIsSoleSelection(isSoleMode);
-      setIsNuovoCliente(false);
-      setMittenteInput('');
-      setDataConsegna(selectedDate || new Date().toISOString().split('T')[0]);
-      setNote('');
-      setErrorMessage('');
-      setProdotti([
-        { codice_articolo: 'FIORDPE', nome_articolo: 'Fior di latte PETRUZZI', quantita: "1", unita_di_misura: 'kg', grammatura: '', numero_lotto: '' }
-      ]);
-
-      if (isSoleMode) {
-        setMittenteSelect(PUNTI_VENDITA_SOLE_PREDEFINITI[0].nome);
-      } else if (clientiRegistrati.length > 0) {
-        setMittenteSelect(clientiRegistrati[0].nome);
+        if (isSoleMode) {
+          setMittenteSelect(PUNTI_VENDITA_SOLE_PREDEFINITI[0].nome);
+        } else if (clientiRegistrati.length > 0) {
+          setMittenteSelect(clientiRegistrati[0].nome);
+        } else {
+          setMittenteSelect('');
+        }
       }
     }
-  }, [editingOrder, isOpen, isSoleMode, selectedDate, clientiRegistrati, listaPuntiSole]);
+
+    prevIsOpenRef.current = isOpen;
+    prevOrderIdRef.current = editingOrder?.id;
+  }, [isOpen, editingOrder?.id]);
 
   if (!isOpen) return null;
 
@@ -186,7 +205,7 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
     setErrorMessage('');
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -220,14 +239,23 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
       return;
     }
 
-    onSave({
-      id: editingOrder?.id,
-      mittente: finalMittente,
-      data_consegna: dataConsegna,
-      note_ordine: note,
-      prodotti: validProdotti
-    });
-    onClose();
+    setIsSaving(true);
+    try {
+      const outcome = await onSave({
+        id: editingOrder?.id,
+        mittente: finalMittente,
+        data_consegna: dataConsegna,
+        note_ordine: note,
+        prodotti: validProdotti
+      });
+      if (outcome !== false) {
+        onClose();
+      }
+    } catch (err) {
+      setErrorMessage("⚠️ Errore durante il salvataggio: " + (err.message || 'Errore di rete'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -478,12 +506,17 @@ export default function OrdiniModal({ isOpen, onClose, onSave, editingOrder, pro
             </button>
             <button
               type="submit"
-              className={`flex items-center space-x-2 px-6 py-2.5 rounded-xl text-white font-black text-xs shadow-md transition transform active:scale-95 ${
+              disabled={isSaving}
+              className={`flex items-center space-x-2 px-6 py-2.5 rounded-xl text-white font-black text-xs shadow-md transition transform active:scale-95 disabled:opacity-50 ${
                 isSoleSelection ? 'bg-amber-800 hover:bg-amber-900' : 'bg-emerald-700 hover:bg-emerald-800'
               }`}
             >
-              <Save className="w-4 h-4" />
-              <span>{editingOrder ? '💾 Salva Modifiche / Aggiusta Ordine' : (isSoleSelection ? 'Salva Ordine Sole 365' : 'Salva Ordine')}</span>
+              <Save className={`w-4 h-4 ${isSaving ? 'animate-spin' : ''}`} />
+              <span>
+                {isSaving
+                  ? 'Salvataggio in corso...'
+                  : (editingOrder ? '💾 Salva Modifiche / Aggiusta Ordine' : (isSoleSelection ? 'Salva Ordine Sole 365' : 'Salva Ordine'))}
+              </span>
             </button>
           </div>
 

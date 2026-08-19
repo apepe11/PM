@@ -17,13 +17,32 @@ def parse_dati_estratti_ia(dati_raw) -> dict:
         return {}
     if isinstance(dati_raw, dict):
         return dati_raw
+    if isinstance(dati_raw, list):
+        for item in dati_raw:
+            if isinstance(item, dict):
+                return item
+        return {}
     if isinstance(dati_raw, str):
         try:
-            return json.loads(dati_raw)
+            res = json.loads(dati_raw)
+            if isinstance(res, dict):
+                return res
+            if isinstance(res, list):
+                for item in res:
+                    if isinstance(item, dict):
+                        return item
+                return {}
         except Exception:
             pass
         try:
-            return ast.literal_eval(dati_raw)
+            res = ast.literal_eval(dati_raw)
+            if isinstance(res, dict):
+                return res
+            if isinstance(res, list):
+                for item in res:
+                    if isinstance(item, dict):
+                        return item
+                return {}
         except Exception:
             return {}
     return {}
@@ -306,11 +325,15 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
         clean_check = nuovo_messaggio.replace("🎙️ [MESSAGGIO VOCALE]", "").replace("🎙️ [VOCALE TRASCRITTO]:", "").strip()
         if len(clean_check) >= 4:
             cursor = await db.execute(
-                "SELECT id FROM ordini WHERE (mittente = ? OR mittente = ?) AND (testo_originale = ? OR testo_originale LIKE ?)",
+                "SELECT id, dati_estratti_ia FROM ordini WHERE (mittente = ? OR mittente = ?) AND (testo_originale = ? OR testo_originale LIKE ?)",
                 (mittente_finale, mittente, nuovo_messaggio, f"%{clean_check}%")
             )
             existing_row = await cursor.fetchone()
             if existing_row:
+                old_dati = parse_dati_estratti_ia(existing_row[1])
+                # Non sovrascrivere ordini modificati manualmente o già confermati/consegnati
+                if old_dati.get("modificato_manualmente") or old_dati.get("stato_ordine") in ["CONFERMATO", "CONSEGNATO"]:
+                    return
                 await db.execute(
                     "UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?",
                     (dati_estratti, existing_row[0])
@@ -665,6 +688,8 @@ async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_c
         dati_parsed["cliente_id"] = new_mittente
         dati_parsed["is_order"] = True
         dati_parsed["da_verificare_manualmente"] = False
+        dati_parsed["modificato_manualmente"] = True
+        dati_parsed["timestamp_modifica"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         await db.execute(
             "UPDATE ordini SET mittente = ?, dati_estratti_ia = ? WHERE id = ?",
@@ -696,7 +721,7 @@ async def rielabora_tutti_ordini(ore_limite: int = 48):
     # 1. Recupera rapidamente le righe e rilascia immediatamente la connessione al DB
     async with get_db_connection() as db:
         cursor = await db.execute(
-            "SELECT id, mittente, testo_originale, data_ricezione FROM ordini WHERE data_ricezione >= ? ORDER BY data_ricezione ASC",
+            "SELECT id, mittente, testo_originale, data_ricezione, dati_estratti_ia FROM ordini WHERE data_ricezione >= ? ORDER BY data_ricezione ASC",
             (limite_dt,)
         )
         rows = await cursor.fetchall()
@@ -704,7 +729,11 @@ async def rielabora_tutti_ordini(ore_limite: int = 48):
     count = 0
     # 2. Elabora con l'IA senza bloccare transazioni aperte su SQLite
     for r in rows:
-        id_ord, mittente, testo_orig, data_ric = r
+        id_ord, mittente, testo_orig, data_ric, dati_raw = r
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
+        if dati_parsed.get("modificato_manualmente") or dati_parsed.get("stato_ordine") in ["CONFERMATO", "CONSEGNATO"]:
+            continue
+
         if not testo_orig or "[Inserimento Manuale Dashboard]" in testo_orig:
             continue
         
@@ -760,8 +789,8 @@ async def riprova_ordini_parser_locale():
         id_ord, mittente, testo_orig, data_ric, dati_raw = r
         dati_parsed = parse_dati_estratti_ia(dati_raw)
         
-        # Se l'ordine è già stato confermato o consegnato, non sovrascrivere
-        if dati_parsed.get("stato_ordine") in ["CONFERMATO", "CONSEGNATO"]:
+        # Se l'ordine è già stato modificato manualmente o confermato/consegnato, non sovrascrivere
+        if dati_parsed.get("modificato_manualmente") or dati_parsed.get("stato_ordine") in ["CONFERMATO", "CONSEGNATO"]:
             continue
 
         if not testo_orig or "[Inserimento Manuale Dashboard]" in testo_orig:

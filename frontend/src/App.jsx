@@ -153,9 +153,12 @@ export default function App() {
           if (orderData.data_consegna && orderData.data_consegna !== selectedDate) {
             setSelectedDate(orderData.data_consegna);
           }
-          fetchDashboardData();
+          await fetchDashboardData();
+          return true;
         } else {
-          showToast("Errore durante l'aggiornamento dell'ordine", 'error');
+          const errData = await res.json().catch(() => ({}));
+          showToast(errData.detail || "Errore durante l'aggiornamento dell'ordine", 'error');
+          return false;
         }
       } else {
         const res = await fetch(`${API_BASE}/ordini`, {
@@ -173,13 +176,17 @@ export default function App() {
           if (orderData.data_consegna && orderData.data_consegna !== selectedDate) {
             setSelectedDate(orderData.data_consegna);
           }
-          fetchDashboardData();
+          await fetchDashboardData();
+          return true;
         } else {
-          showToast("Errore durante il salvataggio dell'ordine", 'error');
+          const errData = await res.json().catch(() => ({}));
+          showToast(errData.detail || "Errore durante il salvataggio dell'ordine", 'error');
+          return false;
         }
       }
     } catch (e) {
-      showToast("Errore durante il salvataggio dell'ordine", 'error');
+      showToast("Errore di rete durante il salvataggio dell'ordine", 'error');
+      return false;
     }
   };
 

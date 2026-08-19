@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response, FileResponse, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from backend.paths import (
     get_bundle_dir,
@@ -370,25 +370,35 @@ async def delete_broadcast_log(id_log: int):
     return {"status": "success"}
 
 @app.post("/api/ordini")
-async def add_ordine(payload: OrdineCreate):
-    prodotti_dict = [p.dict() for p in payload.prodotti]
+async def add_ordine(payload: dict = Body(...)):
+    prodotti_raw = payload.get("prodotti", [])
+    prodotti_dict = [p for p in prodotti_raw if isinstance(p, dict)]
+    mittente = str(payload.get("mittente") or "").strip()
+    if not mittente:
+        raise HTTPException(status_code=400, detail="Il mittente/cliente è obbligatorio")
+    note_ordine = payload.get("note_ordine", "")
+    data_consegna = payload.get("data_consegna")
     ordine_id = await crea_ordine_manuale(
-        mittente=payload.mittente,
+        mittente=mittente,
         prodotti=prodotti_dict,
-        note=payload.note_ordine or "",
-        data_consegna=payload.data_consegna
+        note=note_ordine or "",
+        data_consegna=data_consegna
     )
     return {"status": "ok", "id": ordine_id}
 
 @app.put("/api/ordini/{id_ordine}")
-async def update_ordine(id_ordine: int, payload: OrdineUpdate):
-    prodotti_dict = [p.dict() for p in payload.prodotti]
+async def update_ordine(id_ordine: int, payload: dict = Body(...)):
+    prodotti_raw = payload.get("prodotti", [])
+    prodotti_dict = [p for p in prodotti_raw if isinstance(p, dict)]
+    mittente = payload.get("mittente")
+    note_ordine = payload.get("note_ordine", "")
+    data_consegna = payload.get("data_consegna")
     success = await aggiorna_ordine(
         id_ordine=id_ordine,
-        mittente=payload.mittente,
+        mittente=mittente,
         prodotti=prodotti_dict,
-        note=payload.note_ordine or "", 
-        data_consegna=payload.data_consegna
+        note=note_ordine or "", 
+        data_consegna=data_consegna
     )
     if not success:
         raise HTTPException(status_code=404, detail="Ordine non trovato")

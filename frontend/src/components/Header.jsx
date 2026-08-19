@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, ChevronDown, Tablet, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Tablet, ShieldCheck } from 'lucide-react';
 
 export default function Header({ activeTab, setActiveTab, selectedDate, setSelectedDate, onOpenNewOrderModal, onRefresh, onReprocessAll, isRefreshing }) {
   return (
@@ -54,16 +54,6 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
               </span>
               <span className="hidden sm:inline">WhatsApp</span>
             </div>
-
-            {/* Refresh */}
-            <button
-              onClick={onRefresh}
-              disabled={isRefreshing}
-              className="p-1.5 rounded-lg bg-petruzzi-100 hover:bg-petruzzi-200 text-petruzzi-800 border border-petruzzi-300 transition"
-              title="Aggiorna dati"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-petruzzi-700' : ''}`} />
-            </button>
 
            {/* Navigation Dropdown Menu */}
               <div className="relative">
