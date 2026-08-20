@@ -666,6 +666,21 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 or "[Parser Locale" in str(testo_orig or "")
             )
 
+            is_sole_rec = is_ordine_sole({
+                "mittente": mittente,
+                "note_ordine": dati_parsed.get("note_ordine", ""),
+                "testo_originale": testo_orig
+            })
+
+            is_filoni_rec = is_cliente_mulnar(mittente) or ("franzoli" in str(mittente).lower() or "fronzaroli" in str(mittente).lower())
+            if not is_filoni_rec:
+                for p in prodotti:
+                    p_nome = (p.get("nome_articolo") or p.get("codice_articolo") or "").lower()
+                    p_cod = (p.get("codice_articolo") or "").lower()
+                    if "filon" in p_nome or "filon" in p_cod or "panetto" in p_nome or "pizza" in p_nome or "julienne" in p_nome or "tagju" in p_cod:
+                        is_filoni_rec = True
+                        break
+
             ordini_lista.append({
                 "id": id_ord,
                 "mittente": mittente,
@@ -677,6 +692,8 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 "is_cancelled": is_cancelled_rec,
                 "da_verificare_manualmente": dati_parsed.get("da_verificare_manualmente", False),
                 "is_fallback": is_fallback_rec,
+                "is_sole": is_sole_rec,
+                "is_filoni": is_filoni_rec,
                 "stato_ordine": dati_parsed.get("stato_ordine", "IN_ATTESA"),
                 "stato_confezionamento": dati_parsed.get("stato_confezionamento", "DA_CONFEZIONARE"),
                 "peso_reale": dati_parsed.get("peso_reale"),
@@ -1038,21 +1055,54 @@ def is_sfoglia_articolo(codice: str, nome: str) -> bool:
     n = str(nome or "").lower()
     return "sfoglia" in c or "sfoglia" in n
 
+def is_petruzzella_articolo(codice: str, nome: str) -> bool:
+    """Verifica se l'articolo è una petruzzella (da 0,250kg o da 1kg / kilo)."""
+    c = str(codice or "").lower()
+    n = str(nome or "").lower()
+    return "petrz" in c or "petruzzell" in n or "petruzell" in n or "petruzzell" in c or "petruzell" in c
+
+def is_ricotta_calcolo_a_pezzi(codice: str, nome: str) -> bool:
+    """Verifica se l'articolo è ricotta in carta o ricotta da 0,500kg da calcolare a pezzi nella produzione."""
+    c = str(codice or "").lower()
+    n = str(nome or "").lower()
+    # Ricotta in carta (RICCARTA0500 o 'ricotta in carta')
+    if "riccarta" in c or "riccarta" in n or ("ricotta" in n and "carta" in n) or ("ricotta" in c and "carta" in c):
+        return True
+    # Ricotta da 0,500 (RICOTPE o ricotta 0,500kg / 500g / classica fresca)
+    if c == "ricotpe" or "ricotpe" in c:
+        return True
+    if "ricotta" in n and any(k in n for k in ["0,500", "0.500", "0,5", "0.5", "500g", "500 g", "500gr", "mezzo chilo"]):
+        return True
+    return False
+
 def is_articolo_calcolo_a_pezzi(codice: str, nome: str) -> bool:
     """Verifica se l'articolo va calcolato a PEZZI per la distinta di produzione casaro."""
-    return is_burrata_articolo(codice, nome) or is_sfoglia_articolo(codice, nome)
+    return (
+        is_burrata_articolo(codice, nome)
+        or is_sfoglia_articolo(codice, nome)
+        or is_petruzzella_articolo(codice, nome)
+        or is_ricotta_calcolo_a_pezzi(codice, nome)
+    )
 
 def get_peso_unitario_articolo(codice: str, nome: str) -> float:
     cod = str(codice or "").strip()
     if cod in PRODOTTI_MAP and PRODOTTI_MAP[cod].get("peso_unitario") is not None:
         try:
-            return float(PRODOTTI_MAP[cod]["peso_unitario"])
+            val = float(PRODOTTI_MAP[cod]["peso_unitario"])
+            if val > 0:
+                return val
         except Exception:
             pass
     w = estrai_peso_unitario_da_nome(nome)
     if w > 0:
         return w
-    if is_sfoglia_articolo(codice, nome):
+    c_lower = str(codice or "").lower()
+    n_lower = str(nome or "").lower()
+    if is_petruzzella_articolo(codice, nome):
+        if "01" in c_lower or "1kg" in n_lower or "1 kg" in n_lower or "kilo" in n_lower:
+            return 1.0
+        return 0.25
+    if is_sfoglia_articolo(codice, nome) or is_ricotta_calcolo_a_pezzi(codice, nome):
         return 0.5
     return 0.25
 
@@ -1077,7 +1127,7 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
             qta = float(p.get("quantita", 0))
             um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()
 
-            # Gli articoli come burrata e sfoglia vanno SEMPRE calcolati a PEZZI per la produzione casaro
+            # Gli articoli come burrata, sfoglia, petruzzella e ricotta (in carta o 500g) vanno SEMPRE calcolati a PEZZI per la produzione casaro
             if is_articolo_calcolo_a_pezzi(cod, nome):
                 um = "pezzi"
                 p_um = (p.get("unita_di_misura") or "").lower()
@@ -1086,7 +1136,7 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
                     if peso_un > 0:
                         qta = round(qta / peso_un)
                     else:
-                        qta = round(qta / 0.5) if is_sfoglia_articolo(cod, nome) else round(qta / 0.25)
+                        qta = round(qta / 0.5) if (is_sfoglia_articolo(cod, nome) or is_ricotta_calcolo_a_pezzi(cod, nome)) else round(qta / 0.25)
                 else:
                     qta = round(qta)
 
@@ -1163,7 +1213,7 @@ async def get_produzione_aggregata_sole(data_target: Optional[str] = None):
             qta = float(p.get("quantita", 0))
             um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()
 
-            # Gli articoli come burrata e sfoglia vanno SEMPRE calcolati a PEZZI per la produzione casaro
+            # Gli articoli come burrata, sfoglia, petruzzella e ricotta (in carta o 500g) vanno SEMPRE calcolati a PEZZI per la produzione casaro
             if is_articolo_calcolo_a_pezzi(cod, nome):
                 um = "pezzi"
                 p_um = (p.get("unita_di_misura") or "").lower()
@@ -1172,7 +1222,7 @@ async def get_produzione_aggregata_sole(data_target: Optional[str] = None):
                     if peso_un > 0:
                         qta = round(qta / peso_un)
                     else:
-                        qta = round(qta / 0.5) if is_sfoglia_articolo(cod, nome) else round(qta / 0.25)
+                        qta = round(qta / 0.5) if (is_sfoglia_articolo(cod, nome) or is_ricotta_calcolo_a_pezzi(cod, nome)) else round(qta / 0.25)
                 else:
                     qta = round(qta)
 

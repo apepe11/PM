@@ -265,9 +265,10 @@ class AIParser:
 
         MAPPATURA PRODOTTI AMBIGUI:
         1. SCAMORZE: "scamorze" senza specificare "confezionate" -> SFUSA. Usa "Conf." SOLO se richiesto.
-        2. RICOTTA: "ricotta" generica -> 500g. "ricottina" o "300g" -> 300g/piccole.
+        2. RICOTTA: "ricotta" generica o "ricotta 500g" -> Ricotta 0,500KG (RICOTPE). "ricotta in carta" -> Ricotta in carta 0,500KG (RICCARTA0500). "ricottina" o "300g" -> 300g/piccole.
         3. BURRATA: E' sempre a PEZZI. Se ordina 500g -> 2 pezzi, 1kg -> 4 pezzi. unita_di_misura: "pezzi".
         4. SFOGLIA DI MOZZARELLA (anche Delat / Senza Lattosio): E' da 500g a pezzo. Se ordina a pezzi o a peso (es. 1kg -> 2 pezzi), unita_di_misura: "pezzi".
+        5. PETRUZZELLA: "petruzzella da 250g" o "petruzzella" -> Petruzzella 0,250KG (PETRZ0250PE). "petruzzella da 1kg" o "petruzzella da kilo" -> Petruzzella 1KG (PETRZ01PE).
 
         SCHEMA JSON:
         {{

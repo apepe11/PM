@@ -14,10 +14,10 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
 
 ## 🛠️ Stack Tecnologico
 
-- **Backend Core**: FastAPI, Python 3.11+, Uvicorn, SQLite Async (`aiosqlite` in modalità WAL anti-blocco).
+- **Backend Core**: FastAPI, Python 3.11+, Uvicorn, SQLite Async (`aiosqlite` in modalità WAL anti-blocco concorrenziale).
 - **Intelligenza Artificiale**: Groq API (`openai/gpt-oss-120b` ad alta precisione 120B, `openai/gpt-oss-20b` come fallback resiliente anti-429 e `whisper-large-v3` per la trascrizione vocale istantanea).
-- **Integrazione WhatsApp**: Evolution API (intercettazione webhook, normalizzazione numeri a 10 cifre e sincronizzazione periodica contatti/chat).
-- **Motore PDF**: ReportLab 5.0 (impaginazione nativa vettoriale A4 per schede produzione, bolle confezionamento e distinte pizzerie).
+- **Integrazione WhatsApp**: Evolution API con **Architettura Ibrida** (intercettazione webhook real-time + demone di polling di riconciliazione ogni 2 minuti).
+- **Motore PDF**: ReportLab 5.0 (impaginazione nativa vettoriale A4 per schede produzione, distinte Sole 365, bolle confezionamento e schede filoni pizzeria).
 - **Frontend Grafico**: React 18, Vite, Vanilla CSS & Tailwind CSS, Lucide Icons, Recharts.
 - **Packaging & CI/CD**: PyInstaller Standalone (`build.spec`), GitHub Actions (`.github/workflows/build_windows.yml`).
 - **Controllo Licenza**: Call-Home periodico via `httpx` verso GitHub Gist crittografato.
@@ -28,7 +28,13 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
 
 ### 1. 🏭 Produzione Giornaliera Casaro
 - **Aggregazione Automatica dei Totali**: Consolida tutte le quantità ordinate per singolo formaggio e grammatura per la data selezionata.
-- **Calcolo Burrata in Pezzi (PZ)**: Qualunque tipologia di burrata (classica, tartufo, pistacchio, affumicata, ecc.) viene automaticamente calcolata e conteggiata a **pezzi interi** anziché a peso, garantendo la precisione al banco di filatura.
+- **Calcolo Pezzi Automatico (PZ)**: Gli articoli a pezzo vengono calcolati e conteggiati a **pezzi interi** anziché a peso sia negli ordini in KG che in PEZZI:
+  - Burrata 250g (`BURRA0250PE`)
+  - Sfoglia di mozzarella classica e Delat (`SFOGLIA`, `SFOGLPE`, `SFOGLDELPE`)
+  - Petruzzella da 0,250 kg (`PETRZ0250PE`)
+  - Petruzzella da 1 kg (`PETRZ01PE`)
+  - Ricotta in carta da 0,500 kg (`RICCARTA0500`)
+  - Ricotta classica da 0,500 kg (`RICOTPE`)
 - **Chiusura Ricezione Ordini Manuale (Data Attiva)**: Pulsante per slittare la data di produzione al giorno successivo (con salto automatico del weekend dal sabato al lunedì).
 - **Stampa PDF 1-Pagina A4**: Foglio compatto di lavorazione senza dati sensibili per il personale di produzione.
 
@@ -40,7 +46,7 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
 ### 3. 🍕 Filoni Pizzeria (`/filoni`)
 - **Gestione Distinta Filoni di Mozzarella (`FILMZPE`)**: I prodotti per pizza (filoni, panetti, julienne, tagju) vengono automaticamente esclusi dalla tabella generale del casaro e indirizzati in questa sezione dedicata.
 - **Instradamento Automatico Clienti Pizzeria**:
-  - **Pizzeria Mulnar** (numeri `347 146 1004` e `0975203278`): ordini catalogati automaticamente nei filoni pizzeria.
+  - **Pizzeria Mulnar** (numeri `347 146 1004` e `0975203278`): catalogati automaticamente nei filoni pizzeria.
   - **Giovanni Franzoli** (`+115131027611727`): gestione ordini filoni.
 - **Stampa PDF Scheda Filoni**: Foglio di taglio e preparazione distinto cliente per cliente.
 
@@ -48,32 +54,50 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
 - **Modifica Diretta del File `catalogo/particolarita_clienti.json`**:
   - Creazione, ricerca, modifica ed eliminazione anagrafica e regole IA direttamente dall'interfaccia web.
   - **Aggiungi / Leva Particolarità con 1-Click**: Pulsante rapido sulle schede cliente per rimuovere una regola o aggiungerne una nuova al volo.
-  - **Suggerimenti Rapidi (Tag Regole Frequenti)**: Pulsanti preset nel modal per inserire rapidamente regole come *Filoni Pizzeria*, *Vaschette Fior di Latte 250g*, *Ricotta 500g*, *Senza Lattosio*, *Calcolo a Pezzi*, *Gestione Resi*.
+  - **Suggerimenti Rapidi (Tag Regole Frequenti)**: Pulsanti preset nel modal per inserire rapidamente regole (*Filoni Pizzeria*, *Vaschette Fior di Latte 250g*, *Ricotta 500g*, *Senza Lattosio*, *Calcolo a Pezzi*, *Gestione Resi*).
   - **Hot-Reload in Memoria**: L'IA ricarica all'istante le nuove regole senza bisogno di riavviare il server.
   - **Normalizzazione Telefoni Nazionali**: Pulizia e match esatto dei numeri a 10 cifre (senza troncamenti e con gestione prefissi +39 / 0039).
 
-### 5. 📦 Ordini Clienti & Motore IA Resiliente
-- **Filtro Data Avanzato**: Oggi, Domani, Selettore Calendario o Tutti gli Ordini.
-- **Integrazione e Merge dello Storico Giornaliero**: Quando un cliente invia più messaggi o integrazioni nello stesso giorno (es. *"Aggiungi 2 ricotte"*), l'IA unisce i nuovi articoli con lo storico pregresso senza sovrascrivere l'ordine.
+### 5. 📦 Ricezione WhatsApp & Architettura a Doppio Livello
+- **Canale 1: Webhook Real-Time (< 1 secondo)**: Ricezione push istantanea dei messaggi e vocali appena inviati dai clienti.
+- **Canale 2: Polling di Riconciliazione (Ogni 2 Minuti)**: Demone asincrono di sicurezza che interroga Evolution API per recuperare eventuali messaggi sfuggiti a interruzioni di connessione o riavvii del server.
+- **Deduplicazione per Message ID (`key.id`)**: Controllo su database SQLite locale; i messaggi già catturati dal Webhook vengono scartati in < 1ms a **zero chiamate e zero token IA**.
+- **Buffer di Debounce Centralizzato (20 secondi)**: Se un cliente invia messaggi multipli o vocali consecutivi, vengono uniti in un unico payload prima dell'invio a Groq AI.
 - **Trascrizione Vocali Groq Whisper**: Ogni vocale WhatsApp viene trascritto parola per parola e mostrato con il badge `🎙️ Vocale Trascritto`.
-- **Riconoscimento Clienti e Alias**: Integrazione con la rubrica locale per associare automaticamente i numeri WhatsApp al nome dell'attività.
-- **Auto-Recovery Rate Limit (429)**: Switch automatico sul modello di riserva `openai/gpt-oss-20b` in caso di rate limit temporaneo e ripristino istantaneo al modello primario `openai/gpt-oss-120b` all'ordine successivo.
+- **Auto-Recovery Rate Limit (429)**: Switch automatico sul modello di riserva `openai/gpt-oss-20b` in caso di rate limit temporaneo e ripristino istantaneo al modello primario `openai/gpt-oss-120b`.
 
-### 6. ✅ Ordini Confermati & Tracciabilità Lotto
-- **Flusso Confezionamento**: Gli ordini evasi dal tablet o confermati manualmente si spostano nella cronologia confermati.
+### 6. 📱 Postazione Tablet Confezionamento (`/tablet`)
+- **Interfaccia Touch Screen per Laboratorio**: Ottimizzata per tablet Samsung Galaxy A8 e postazioni touch di pesatura.
+- **3 Macro-Sezioni Dedicate**:
+  - 📋 **Tutti gli Ordini**: Vista complessiva e ordini standard (bar, ristoranti, alimentari, privati).
+  - ☀️ **Gruppo Sole 365**: Scheda filtrata con tema dedicato per i supermercati Sole 365.
+  - 🍕 **Filoni Pizzeria**: Scheda filtrata per pizzerie e preparazione filoni/panetti/julienne.
+- **Avanzamento & Contatori Live**: Indicatori di stato in tempo reale (es. `15/20 evasi`, `4/4 evasi`, `3/5 evasi`).
+- **Badge di Categoria**: Identificazione immediata di ogni ordine (`☀️ SOLE 365`, `🍕 FILONI PIZZERIA`, `🧀 STANDARD`).
+- **Filtri Rapidi & Ricerca**: Filtro veloce per `Tutti`, `⏳ Da Confezionare` o `✅ Confezionati` e barra di ricerca per cliente/articolo.
+- **Anti-Data Loss su Re-Render**: Preservazione automatica dei campi digitati localmente (`Lotto` e `Grammatura`) durante il cambio scheda e durante i cicli di sincronizzazione.
+- **Conferma per Singola Riga & Validazione**: Controllo obbligatorio di peso e lotto prima del salvataggio finale.
+
+### 7. ✅ Ordini Confermati & Tracciabilità Lotto
+- **Flusso Confezionamento**: Gli ordini evasi si spostano automaticamente nella cronologia confermati.
 - **Grammatura e Lotto per Articolo**:
   - Peso fisso con grammatura automatica e inserimento numero lotto.
   - Peso variabile con registrazione del peso effettivo pesato.
 - **Stampa Bolla di Spedizione PDF**: Scheda con lotti, grammature e pesi per ogni articolo.
 
-### 7. 📱 Postazione Tablet Confezionamento (`/tablet`)
-- **Interfaccia Touch Screen per Laboratorio**: Ottimizzata per tablet Samsung Galaxy A8 e schermi touch.
-- **Anti-Data Loss su Re-Render**: Preservazione automatica dei campi digitati localmente (`Lotto` e `Grammatura`) durante il polling o gli aggiornamenti di background.
-- **Guida Visiva Articoli Incompleti**: Evidenziazione in rosso con bordo dedicato per le righe e gli input che richiedono ancora la compilazione di lotto o peso reale.
-- **Inserimento Peso & Lotto**: I lavoratori inseriscono i kg reali pesati e confermano l'ordine senza toccare mouse o tastiera.
-
 ### 8. 📊 Statistiche & Controllo di Gestione
 - Analisi per periodo (Mese, Trimestre, Anno), grafici di trend referenze, volumi totali kg e top account B2B.
+
+---
+
+## ⏱️ Demoni di Background & Polling di Sistema
+
+| Processo / Demone | Frequenza | Funzione |
+| :--- | :--- | :--- |
+| **Sincronizzazione Schermi Frontend** | **Ogni 5 secondi** | Aggiorna in tempo reale ordini, pesi e lotti su Tablet e Dashboard PC |
+| **Polling Demone Broadcast** | **Ogni 30 secondi** | Verifica e invia comunicazioni promozionali programmate via WhatsApp |
+| **Polling Riconciliazione WhatsApp** | **Ogni 2 minuti** | Safety Net per recuperare messaggi sfuggiti a cadute di rete/webhook |
+| **Controllo Licenza Call-Home** | **Ogni 5 minuti** | Verifica remota della validità della licenza software su GitHub Gist |
 
 ---
 

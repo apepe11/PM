@@ -15,14 +15,42 @@ import {
   Check, 
   Edit3, 
   Sparkles,
-  Copy
+  Copy,
+  Sun,
+  Pizza,
+  Search,
+  Filter,
+  Store
 } from 'lucide-react';
 import { formatDateIT } from '../utils/dateUtils';
+
+// Helper di classificazione categoria ordine
+const isSoleOrder = (ord) => {
+  if (ord.is_sole !== undefined && ord.is_sole !== null) return Boolean(ord.is_sole);
+  const m = (ord.mittente || '').toLowerCase();
+  const n = (ord.note_ordine || '').toLowerCase();
+  const t = (ord.testo_originale || '').toLowerCase();
+  return m.includes('sole') || m.includes('365') || n.includes('sole') || n.includes('365') || t.includes('sole') || t.includes('365');
+};
+
+const isFiloniOrder = (ord) => {
+  if (ord.is_filoni !== undefined && ord.is_filoni !== null) return Boolean(ord.is_filoni);
+  const m = (ord.mittente || '').toLowerCase();
+  if (m.includes('mulnar') || m.includes('franzoli') || m.includes('fronzaroli')) return true;
+  return (ord.prodotti || []).some(p => {
+    const nome = (p.nome_articolo || p.codice_articolo || '').toLowerCase();
+    const cod = (p.codice_articolo || '').toLowerCase();
+    return nome.includes('filon') || cod.includes('filon') || nome.includes('panetto') || nome.includes('pizza') || nome.includes('julienne') || cod.includes('tagju');
+  });
+};
 
 export default function PostazioneTablet() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [ordini, setOrdini] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('tutti'); // 'tutti' | 'sole' | 'filoni'
+  const [statusFilter, setStatusFilter] = useState('tutti'); // 'tutti' | 'da_confezionare' | 'confezionati'
+  const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({});
   const [confirmedItems, setConfirmedItems] = useState({}); // { [orderId]: { [pIdx]: boolean } }
   const [itemErrors, setItemErrors] = useState({}); // { [orderId]: { [pIdx]: string } }
@@ -193,43 +221,6 @@ export default function PostazioneTablet() {
     });
   };
 
-  // Conferma rapida per tutti gli articoli compilati
-  const handleConfirmAllValidItems = (orderId) => {
-    const prods = formData[orderId] || [];
-    let updatedConfirmed = { ...(confirmedItems[orderId] || {}) };
-    let missingErrors = {};
-    let hasError = false;
-
-    prods.forEach((p, idx) => {
-      const pVal = parseFloat(p.grammatura);
-      const hasValidWeight = p.grammatura && !isNaN(pVal) && pVal > 0;
-      const hasValidLotto = p.numero_lotto && p.numero_lotto.trim() !== '';
-
-      if (hasValidWeight && hasValidLotto) {
-        updatedConfirmed[idx] = true;
-      } else {
-        hasError = true;
-        missingErrors[idx] = 'Compila peso e lotto!';
-      }
-    });
-
-    setConfirmedItems(prev => ({
-      ...prev,
-      [orderId]: updatedConfirmed
-    }));
-
-    if (hasError) {
-      setItemErrors(prev => ({
-        ...prev,
-        [orderId]: missingErrors
-      }));
-      setValidationError(prev => ({
-        ...prev,
-        [orderId]: "⚠️ Alcuni articoli non hanno peso o lotto valido. Compilali e confermali."
-      }));
-    }
-  };
-
   // Conferma finale dell'intero ordine
   const handleConfirmConfezionamento = async (orderId) => {
     const productsToSave = formData[orderId] || [];
@@ -293,8 +284,51 @@ export default function PostazioneTablet() {
     }
   };
 
+  // Suddivisione ordini per categorie
+  const ordiniSole = ordini.filter(o => isSoleOrder(o));
+  const ordiniFiloni = ordini.filter(o => isFiloniOrder(o));
+  const ordiniTutti = ordini;
+
+  // Calcolo statistiche per le tab
+  const getStats = (list) => {
+    const total = list.length;
+    const conf = list.filter(o => o.stato_confezionamento === 'CONFEZIONATO').length;
+    const daConf = total - conf;
+    return { total, conf, daConf };
+  };
+
+  const statsTutti = getStats(ordiniTutti);
+  const statsSole = getStats(ordiniSole);
+  const statsFiloni = getStats(ordiniFiloni);
+
+  // Ordini base per la tab selezionata
+  let currentCategoryOrders = [];
+  if (activeTab === 'sole') currentCategoryOrders = ordiniSole;
+  else if (activeTab === 'filoni') currentCategoryOrders = ordiniFiloni;
+  else currentCategoryOrders = ordiniTutti;
+
+  // Filtro stato e ricerca
+  const displayedOrders = currentCategoryOrders.filter(ord => {
+    const isConfezionato = ord.stato_confezionamento === 'CONFEZIONATO';
+    if (statusFilter === 'da_confezionare' && isConfezionato) return false;
+    if (statusFilter === 'confezionati' && !isConfezionato) return false;
+
+    if (searchTerm.trim() !== '') {
+      const q = searchTerm.toLowerCase();
+      const matchMittente = (ord.mittente || '').toLowerCase().includes(q);
+      const matchId = String(ord.id).includes(q);
+      const matchProd = (ord.prodotti || []).some(p => 
+        (p.nome_articolo || '').toLowerCase().includes(q) || 
+        (p.codice_articolo || '').toLowerCase().includes(q)
+      );
+      if (!matchMittente && !matchId && !matchProd) return false;
+    }
+
+    return true;
+  });
+
   return (
-    <div className="min-h-screen bg-[#FAF6F0] text-petruzzi-950 p-4 sm:p-6 space-y-6 font-sans">
+    <div className="min-h-screen bg-[#FAF6F0] text-petruzzi-950 p-3 sm:p-6 space-y-5 font-sans">
       
       {toast && (
         <div className="fixed top-4 right-4 z-50 bg-emerald-700 text-white font-black px-6 py-3.5 rounded-2xl shadow-2xl animate-bounce flex items-center space-x-2 border-2 border-white/20">
@@ -303,18 +337,21 @@ export default function PostazioneTablet() {
         </div>
       )}
 
-      {/* Header Postazione Tablet */}
-      <div className="petruzzi-card p-4 rounded-2xl flex items-center justify-between border border-petruzzi-200 bg-white/90 shadow-md">
+      {/* Header Postazione Tablet & Data */}
+      <div className="petruzzi-card p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4 border border-petruzzi-200 bg-white/90 shadow-md">
         <div className="flex items-center space-x-3">
-          <div className="p-3 bg-petruzzi-100 text-petruzzi-800 rounded-xl border border-petruzzi-300">
+          <div className="p-3 bg-petruzzi-800 text-white rounded-xl border border-petruzzi-900 shadow-sm">
             <Tablet className="w-7 h-7" />
           </div>
           <div>
-            <h1 className="text-xl font-black text-petruzzi-950">Postazione Confezionamento Tablet</h1>
-            <p className="text-xs text-petruzzi-700">Pesatura Singoli Articoli & Conferma Finale Ordine</p>
+            <h1 className="text-xl sm:text-2xl font-black text-petruzzi-950 flex items-center space-x-2">
+              <span>Postazione Confezionamento Tablet</span>
+            </h1>
+            <p className="text-xs text-petruzzi-700 font-semibold">Pesatura Singoli Articoli, Lottizzazione & Chiusura Ordini</p>
           </div>
         </div>
 
+        {/* Date Selector & Refresh */}
         <div className="flex items-center space-x-2">
           <input
             type="date"
@@ -326,8 +363,18 @@ export default function PostazioneTablet() {
             {formatDateIT(selectedDate)}
           </span>
           <button
-            onClick={fetchOrdiniTablet}
-            className="p-2.5 bg-petruzzi-800 hover:bg-petruzzi-900 text-white rounded-xl border border-petruzzi-900 active:scale-95 transition"
+            onClick={() => {
+              const tmr = new Date();
+              tmr.setDate(tmr.getDate() + 1);
+              setSelectedDate(tmr.toISOString().split('T')[0]);
+            }}
+            className="px-3 py-2 bg-white hover:bg-petruzzi-100 text-petruzzi-800 font-bold text-xs rounded-xl border border-petruzzi-300 transition shadow-sm"
+          >
+            Domani
+          </button>
+          <button
+            onClick={() => fetchOrdiniTablet()}
+            className="p-2.5 bg-petruzzi-800 hover:bg-petruzzi-900 text-white rounded-xl border border-petruzzi-900 active:scale-95 transition shadow-sm"
             title="Rinfresca Ordini"
           >
             <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin text-petruzzi-300' : ''}`} />
@@ -335,20 +382,206 @@ export default function PostazioneTablet() {
         </div>
       </div>
 
-      {/* Lista Ordini */}
-      <div className="grid grid-cols-1 gap-6">
-        {ordini.length === 0 ? (
-          <div className="p-12 text-center petruzzi-card rounded-2xl border border-petruzzi-200">
+      {/* SELEZIONE SEZIONI TABLET (3 TABS TOUCH SCREEN) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        
+        {/* 1. TAB TUTTI GLI ORDINI */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('tutti')}
+          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between space-y-2 shadow-sm ${
+            activeTab === 'tutti'
+              ? 'bg-petruzzi-800 text-white border-petruzzi-900 ring-2 ring-petruzzi-700 shadow-md scale-[1.01]'
+              : 'bg-white text-petruzzi-950 border-petruzzi-200 hover:bg-petruzzi-50'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-base sm:text-lg font-black flex items-center space-x-2">
+              <Layers className={`w-5 h-5 ${activeTab === 'tutti' ? 'text-petruzzi-200' : 'text-petruzzi-700'}`} />
+              <span>Tutti gli Ordini</span>
+            </span>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-black ${
+              activeTab === 'tutti'
+                ? (statsTutti.daConf === 0 && statsTutti.total > 0 ? 'bg-emerald-500 text-white' : 'bg-petruzzi-950 text-amber-200')
+                : (statsTutti.daConf === 0 && statsTutti.total > 0 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-petruzzi-100 text-petruzzi-800')
+            }`}>
+              {statsTutti.total} totali
+            </span>
+          </div>
+          
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className={activeTab === 'tutti' ? 'text-petruzzi-200' : 'text-petruzzi-600'}>
+              Tutti i Clienti & Ordini
+            </span>
+            <span className={`text-xs font-black ${
+              statsTutti.daConf === 0 && statsTutti.total > 0 
+                ? (activeTab === 'tutti' ? 'text-emerald-300' : 'text-emerald-700')
+                : (activeTab === 'tutti' ? 'text-amber-300' : 'text-amber-700')
+            }`}>
+              {statsTutti.conf}/{statsTutti.total} evasi
+            </span>
+          </div>
+        </button>
+
+        {/* 2. TAB SOLE 365 */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('sole')}
+          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between space-y-2 shadow-sm ${
+            activeTab === 'sole'
+              ? 'bg-amber-600 text-white border-amber-700 ring-2 ring-amber-400 shadow-md scale-[1.01]'
+              : 'bg-amber-50/70 text-amber-950 border-amber-300 hover:bg-amber-100/70'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-base sm:text-lg font-black flex items-center space-x-2">
+              <Sun className={`w-5 h-5 ${activeTab === 'sole' ? 'text-white' : 'text-amber-600'}`} />
+              <span>Gruppo Sole 365</span>
+            </span>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-black ${
+              activeTab === 'sole'
+                ? (statsSole.daConf === 0 && statsSole.total > 0 ? 'bg-emerald-500 text-white' : 'bg-amber-800 text-white')
+                : (statsSole.daConf === 0 && statsSole.total > 0 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-200 text-amber-950')
+            }`}>
+              {statsSole.total} ordini
+            </span>
+          </div>
+          
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className={activeTab === 'sole' ? 'text-amber-100' : 'text-amber-800'}>
+              Punti Vendita Sole
+            </span>
+            <span className={`text-xs font-black ${
+              statsSole.daConf === 0 && statsSole.total > 0 
+                ? (activeTab === 'sole' ? 'text-emerald-200' : 'text-emerald-700')
+                : (activeTab === 'sole' ? 'text-amber-100' : 'text-amber-900')
+            }`}>
+              {statsSole.conf}/{statsSole.total} evasi
+            </span>
+          </div>
+        </button>
+
+        {/* 3. TAB FILONI & PIZZERIE */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('filoni')}
+          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between space-y-2 shadow-sm ${
+            activeTab === 'filoni'
+              ? 'bg-orange-600 text-white border-orange-700 ring-2 ring-orange-400 shadow-md scale-[1.01]'
+              : 'bg-orange-50/70 text-orange-950 border-orange-300 hover:bg-orange-100/70'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-base sm:text-lg font-black flex items-center space-x-2">
+              <Pizza className={`w-5 h-5 ${activeTab === 'filoni' ? 'text-white' : 'text-orange-600'}`} />
+              <span>Filoni Pizzeria</span>
+            </span>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-black ${
+              activeTab === 'filoni'
+                ? (statsFiloni.daConf === 0 && statsFiloni.total > 0 ? 'bg-emerald-500 text-white' : 'bg-orange-800 text-white')
+                : (statsFiloni.daConf === 0 && statsFiloni.total > 0 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-orange-200 text-orange-950')
+            }`}>
+              {statsFiloni.total} ordini
+            </span>
+          </div>
+          
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className={activeTab === 'filoni' ? 'text-orange-100' : 'text-orange-800'}>
+              Pizzerie & Filoni
+            </span>
+            <span className={`text-xs font-black ${
+              statsFiloni.daConf === 0 && statsFiloni.total > 0 
+                ? (activeTab === 'filoni' ? 'text-emerald-200' : 'text-emerald-700')
+                : (activeTab === 'filoni' ? 'text-orange-100' : 'text-orange-900')
+            }`}>
+              {statsFiloni.conf}/{statsFiloni.total} evasi
+            </span>
+          </div>
+        </button>
+
+      </div>
+
+      {/* TOOLBAR DI RICERCA E FILTRI STATO PER SEZIONE */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 px-4 rounded-xl bg-white border border-petruzzi-200 shadow-sm">
+        
+        {/* Ricerca Veloce */}
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Search className="w-4 h-4 absolute left-3 top-3 text-petruzzi-600" />
+          <input
+            type="text"
+            placeholder="Cerca cliente o articolo..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-petruzzi-50/70 border border-petruzzi-300 rounded-xl pl-9 pr-3 py-1.5 text-xs text-petruzzi-950 font-bold placeholder-petruzzi-600/70 focus:outline-none focus:border-petruzzi-700"
+          />
+        </div>
+
+        {/* Filtri Stato Ordine */}
+        <div className="flex items-center space-x-1.5">
+          <span className="text-[11px] font-black text-petruzzi-700 uppercase mr-1">Filtro:</span>
+          
+          <button
+            onClick={() => setStatusFilter('tutti')}
+            className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+              statusFilter === 'tutti'
+                ? 'bg-petruzzi-800 text-white'
+                : 'bg-petruzzi-100 text-petruzzi-800 hover:bg-petruzzi-200'
+            }`}
+          >
+            Tutti ({currentCategoryOrders.length})
+          </button>
+          
+          <button
+            onClick={() => setStatusFilter('da_confezionare')}
+            className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
+              statusFilter === 'da_confezionare'
+                ? 'bg-amber-700 text-white'
+                : 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Da Confezionare ({currentCategoryOrders.filter(o => o.stato_confezionamento !== 'CONFEZIONATO').length})</span>
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('confezionati')}
+            className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
+              statusFilter === 'confezionati'
+                ? 'bg-emerald-700 text-white'
+                : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200 border border-emerald-300'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Confezionati ({currentCategoryOrders.filter(o => o.stato_confezionamento === 'CONFEZIONATO').length})</span>
+          </button>
+        </div>
+
+      </div>
+
+      {/* Lista Ordini della Sezione */}
+      <div className="grid grid-cols-1 gap-5">
+        {displayedOrders.length === 0 ? (
+          <div className="p-12 text-center petruzzi-card rounded-2xl border border-petruzzi-200 bg-white/90">
             <PackageCheck className="w-12 h-12 text-petruzzi-600 mx-auto mb-3" />
-            <h3 className="text-lg font-bold text-petruzzi-800">Nessun ordine da confezionare per questa data</h3>
+            <h3 className="text-lg font-bold text-petruzzi-800">
+              Nessun ordine trovato per la sezione selezionata
+            </h3>
+            <p className="text-xs text-petruzzi-600 mt-1">
+              {searchTerm 
+                ? 'Nessun ordine corrisponde ai filtri di ricerca impostati.' 
+                : 'Tutti gli ordini di questa categoria sono stati elaborati o non ve ne sono per la data selezionata.'}
+            </p>
           </div>
         ) : (
-          ordini.map((ord) => {
+          displayedOrders.map((ord) => {
             const isConfezionato = ord.stato_confezionamento === 'CONFEZIONATO';
             const currentProds = formData[ord.id] || [];
             const orderConfirmedMap = confirmedItems[ord.id] || {};
             const orderItemErrors = itemErrors[ord.id] || {};
             const vErr = validationError[ord.id];
+
+            const isThisSole = isSoleOrder(ord);
+            const isThisFiloni = isFiloniOrder(ord);
 
             const totalProds = currentProds.length;
             const confirmedCount = isConfezionato 
@@ -362,20 +595,47 @@ export default function PostazioneTablet() {
             return (
               <div
                 key={ord.id}
-                className={`petruzzi-card p-5 sm:p-6 rounded-2xl border space-y-4 transition ${
-                  isConfezionato ? 'border-emerald-300 bg-emerald-50/30' : 'border-petruzzi-200 hover:border-petruzzi-300'
+                className={`petruzzi-card p-4 sm:p-6 rounded-2xl border space-y-4 transition ${
+                  isConfezionato 
+                    ? 'border-emerald-300 bg-emerald-50/40' 
+                    : isThisSole
+                      ? 'border-amber-300/80 bg-white'
+                      : isThisFiloni
+                        ? 'border-orange-300/80 bg-white'
+                        : 'border-petruzzi-200 bg-white hover:border-petruzzi-300'
                 }`}
               >
                 {/* Header Scheda Ordine */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-petruzzi-200 pb-4">
-                  <div>
-                    <div className="flex items-center space-x-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-petruzzi-200 pb-3.5">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-lg sm:text-xl font-black text-petruzzi-950">{ord.mittente}</h3>
                       <span className="text-xs font-mono font-bold bg-petruzzi-100 text-petruzzi-800 px-2 py-0.5 rounded-md border border-petruzzi-300">
                         #{ord.id}
                       </span>
+
+                      {/* BADGE CATEGORIA ORDINE */}
+                      {isThisSole && (
+                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-950 text-[10px] font-black border border-amber-300">
+                          <Sun className="w-3 h-3 text-amber-700" />
+                          <span>SOLE 365</span>
+                        </span>
+                      )}
+                      {isThisFiloni && (
+                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-orange-100 text-orange-950 text-[10px] font-black border border-orange-300">
+                          <Pizza className="w-3 h-3 text-orange-700" />
+                          <span>FILONI PIZZERIA</span>
+                        </span>
+                      )}
+                      {!isThisSole && !isThisFiloni && (
+                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-petruzzi-100 text-petruzzi-900 text-[10px] font-black border border-petruzzi-300">
+                          <span>🧀 STANDARD</span>
+                        </span>
+                      )}
                     </div>
-                    <span className="text-xs text-petruzzi-700 font-medium">Consegna Target: {formatDateIT(ord.data_consegna)}</span>
+                    <div className="text-xs text-petruzzi-700 font-medium">
+                      Consegna Target: <strong>{formatDateIT(ord.data_consegna)}</strong>
+                    </div>
                   </div>
 
                   <div className="flex items-center space-x-3">

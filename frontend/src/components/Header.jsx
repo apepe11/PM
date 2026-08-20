@@ -69,7 +69,7 @@ export default function Header({ activeTab, setActiveTab, selectedDate, setSelec
                   className="bg-gradient-to-r from-petruzzi-700 to-petruzzi-800 text-white font-black text-xs rounded-xl pl-3.5 pr-8 py-2 outline-none cursor-pointer shadow-md border border-petruzzi-900 hover:from-petruzzi-800 hover:to-petruzzi-900 transition appearance-none"
                 >
                   {/* GRUPPO 1: Gestione Principale */}
-                  <option value="produzione" className="bg-white text-petruzzi-950 font-bold">🏭 Produzione Casaro</option>
+                  <option value="produzione" className="bg-white text-petruzzi-950 font-bold">🏭 Produzione</option>
                   
                   <option value="ordini" className="bg-white text-petruzzi-950 font-bold">📦 Ordini Clienti</option>
                   <option value="nuovo-ordine" className="bg-petruzzi-100 text-petruzzi-950 font-black">➕ Creazione Nuovo Ordine</option>

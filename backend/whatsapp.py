@@ -155,11 +155,22 @@ async def invia_messaggio_whatsapp(destinatario_o_numero: str, testo: str) -> bo
         add_whatsapp_log(f"❌ Eccezione invio WhatsApp Evolution: {e}", "ERROR")
         return False
 
-# Sincronizzazione periodica / fetch storico disattivata:
-# Il sistema opera esclusivamente in tempo reale via Webhook per non consumare chiamate IA
+async def _sync_loop_worker() -> None:
+    add_whatsapp_log(f"🚀 Demone Polling WhatsApp attivo (controllo di sicurezza ogni {SYNC_INTERVAL_SECONDS}s)...", "INFO")
+    # Attesa iniziale all'avvio prima del primo controllo
+    await asyncio.sleep(15)
+    while True:
+        try:
+            await controlla_nuovi_messaggi_whatsapp()
+        except Exception as e:
+            logging.error(f"Errore loop polling WhatsApp: {e}")
+        await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+
 def avvia_loop_sincronizzazione_periodica() -> None:
-    """Disattivato: l'elaborazione avviene esclusivamente in tempo reale via webhook."""
-    pass
+    """Avvia il demone asincrono di polling periodico (ogni 2 minuti)."""
+    global _sync_loop_task
+    if _sync_loop_task is None or _sync_loop_task.done():
+        _sync_loop_task = asyncio.create_task(_sync_loop_worker())
 
 async def avvia_whatsapp() -> None:
     add_whatsapp_log("🚀 Connessione al motore Evolution API in corso...", "INFO")
@@ -332,14 +343,135 @@ def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
     return []
 
 async def controlla_nuovi_messaggi_whatsapp() -> None:
-    """Disattivato: il recupero e pull dei messaggi storici è stato disabilitato per preservare le chiamate IA.
-    Il sistema riceve ed elabora esclusivamente i nuovi messaggi in tempo reale tramite Webhook.
+    """Polling di sicurezza periodico (ogni 2 minuti).
+    Interroga Evolution API per verificare se ci sono messaggi WhatsApp recenti sfuggiti ai Webhook.
+    I messaggi già elaborati vengono scartati all'istante tramite chiave_univoca (key.id) a costo zero.
     """
-    pass
+    if not is_licenza_attiva():
+        return
+
+    # 1. Verifica stato connessione Evolution
+    try:
+        res = requests.get(f"{EVOLUTION_URL}/instance/connectionState/{INSTANCE_NAME}", headers=_req_headers(), timeout=5)
+        if res.status_code != 200:
+            return
+        state = res.json().get("instance", {}).get("state")
+        if state != "open":
+            if WHATSAPP_STATE.get("stato_connessione") != "IN_ATTESA_QR":
+                WHATSAPP_STATE["stato_connessione"] = "DISCONNESSO"
+            return
+        else:
+            WHATSAPP_STATE["stato_connessione"] = "CONNESSO"
+    except Exception:
+        return
+
+    WHATSAPP_STATE["ultima_sincronizzazione_periodica"] = datetime.now().strftime('%H:%M:%S')
+
+    # 2. Richiedi gli ultimi messaggi recenti da Evolution API
+    try:
+        url = f"{EVOLUTION_URL}/chat/findMessages/{INSTANCE_NAME}"
+        payload = {
+            "where": {
+                "key": {
+                    "fromMe": False
+                }
+            },
+            "limit": 50
+        }
+        res = requests.post(url, json=payload, headers=_req_headers(), timeout=12)
+        
+        messages = []
+        if res.status_code in [200, 201]:
+            dati = res.json()
+            messages = _estrai_lista_evolution(dati, "messages") or (dati if isinstance(dati, list) else dati.get("records", []))
+        else:
+            # Fallback generico senza where
+            res_alt = requests.post(url, json={"limit": 50}, headers=_req_headers(), timeout=12)
+            if res_alt.status_code in [200, 201]:
+                dati_alt = res_alt.json()
+                messages = _estrai_lista_evolution(dati_alt, "messages") or (dati_alt if isinstance(dati_alt, list) else dati_alt.get("records", []))
+
+        if not messages or not isinstance(messages, list):
+            return
+
+        messaggi_nuovi_trovati = 0
+        for msg in messages:
+            if not isinstance(msg, dict) or not msg.get("key"):
+                continue
+
+            if msg.get("key", {}).get("fromMe") == True:
+                continue
+
+            key = msg.get("key", {})
+            remote_jid_alt = key.get("remoteJidAlt", "")
+            mittente_id = key.get("remoteJid", "")
+            if "@g.us" in mittente_id:
+                continue
+
+            chiave_univoca = key.get("id", "")
+            if not chiave_univoca:
+                continue
+
+            # CONTROLLO ANTI-DUPLICAZIONE: se già elaborato da Webhook, salta subito a costo zero
+            if await is_messaggio_elaborato(chiave_univoca):
+                continue
+
+            await segna_messaggio_elaborato(chiave_univoca)
+
+            phone_number = remote_jid_alt.split("@")[0] if remote_jid_alt else mittente_id.split("@")[0]
+            nome_finale = _trova_nome_in_rubrica_locale(phone_number)
+            if not nome_finale:
+                nome_finale = _estrai_nome_contatto(msg, phone_number)
+            if not nome_finale:
+                nome_finale = _forza_ricerca_nome_evolution(mittente_id, phone_number)
+
+            mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
+
+            testo = ""
+            is_vocal = False
+            msg_content = msg.get("message", {})
+
+            if isinstance(msg_content, dict):
+                if "conversation" in msg_content:
+                    testo = msg_content["conversation"]
+                elif "extendedTextMessage" in msg_content:
+                    testo = msg_content["extendedTextMessage"].get("text", "")
+                elif "audioMessage" in msg_content:
+                    is_vocal = True
+                    testo = "Vocale o Media"
+                elif "documentMessage" in msg_content and "audio" in str(msg_content["documentMessage"].get("mimetype", "")).lower():
+                    is_vocal = True
+                    testo = "Vocale o Media"
+                elif "imageMessage" in msg_content:
+                    testo = msg_content["imageMessage"].get("caption", "Immagine")
+
+            msg_type_str = str(msg.get("messageType", "")).lower()
+            if msg_type_str in ["audiomessage", "ptt", "voice"]:
+                is_vocal = True
+                testo = testo or "Vocale o Media"
+
+            if not testo and not is_vocal:
+                continue
+
+            timestamp_unix = msg.get("messageTimestamp", datetime.now().timestamp())
+            if isinstance(timestamp_unix, (int, float)):
+                data_ricezione_custom = datetime.fromtimestamp(timestamp_unix).strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                data_ricezione_custom = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            messaggi_nuovi_trovati += 1
+            add_whatsapp_log(f"🔄 [POLLING 2-MIN] Recuperato messaggio da {mittente}: {testo}", "INCOMING")
+            asyncio.create_task(_accoda_messaggio_utente(mittente, testo, is_vocal, msg, data_ricezione_custom))
+
+        if messaggi_nuovi_trovati > 0:
+            add_whatsapp_log(f"✅ Polling completato: {messaggi_nuovi_trovati} nuovi messaggi recuperati ed elaborati.", "SUCCESS")
+
+    except Exception as e:
+        add_whatsapp_log(f"⚠️ Errore durante il polling messaggi: {e}", "WARN")
 
 async def sincronizza_chat_recenti_background() -> None:
-    """Disattivato: nessun recupero dello storico chat."""
-    pass
+    """Esegue un ciclo di controllo dei messaggi recenti."""
+    await controlla_nuovi_messaggi_whatsapp()
 
 async def elabora_webhook_evolution(payload: dict) -> None:
     if not is_licenza_attiva():

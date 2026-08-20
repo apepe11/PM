@@ -68,7 +68,8 @@ from backend.whatsapp import (
     get_whatsapp_status, 
     reset_whatsapp_banco, 
     forzare_scansione_chat, 
-    elabora_webhook_evolution
+    elabora_webhook_evolution,
+    avvia_loop_sincronizzazione_periodica
 )
 
 # ---------------------------------------------------------
@@ -188,8 +189,8 @@ class OrdineUpdate(BaseModel):
 async def startup_event():
     await init_db()
     asyncio.create_task(controllo_licenza_periodico())
-    # Sincronizzazione storico chat disattivata: elaborazione solo via webhook in tempo reale
     asyncio.create_task(avvia_whatsapp())
+    avvia_loop_sincronizzazione_periodica()
     from backend.broadcast import avvia_demone_broadcast
     asyncio.create_task(avvia_demone_broadcast())
 
