@@ -144,11 +144,30 @@ async def normalize_data_consegna(data_consegna: Any, data_ricezione: Optional[s
 
 async def _trova_ordine_esistente_per_data(db, mittente: str, data_consegna_target: Optional[str], finestra_giorni: int = 7):
     limite_ricezione = (datetime.now() - timedelta(days=finestra_giorni)).strftime('%Y-%m-%d %H:%M:%S')
-    cursor = await db.execute(
-        "SELECT id, testo_originale, dati_estratti_ia, data_ricezione FROM ordini "
-        "WHERE mittente = ? AND data_ricezione >= ? ORDER BY data_ricezione DESC LIMIT 15",
-        (mittente, limite_ricezione)
-    )
+    
+    # Costruisci condizioni di ricerca flessibili per il mittente (nome pulito e cifre telefono)
+    clean_name = re.sub(r'\(.*?\)', '', str(mittente or '')).strip()
+    phone_digits = re.sub(r'\D', '', str(mittente or ''))
+    
+    conditions = ["mittente = ?"]
+    params = [mittente]
+    
+    if clean_name and len(clean_name) >= 3:
+        if clean_name != mittente:
+            conditions.append("mittente = ?")
+            params.append(clean_name)
+        conditions.append("mittente LIKE ?")
+        params.append(f"%{clean_name}%")
+        
+    if len(phone_digits) >= 8:
+        conditions.append("mittente LIKE ?")
+        params.append(f"%{phone_digits}%")
+        
+    where_clause = " OR ".join(conditions)
+    params.append(limite_ricezione)
+    
+    query = f"SELECT id, testo_originale, dati_estratti_ia, data_ricezione FROM ordini WHERE ({where_clause}) AND data_ricezione >= ? ORDER BY data_ricezione DESC LIMIT 20"
+    cursor = await db.execute(query, tuple(params))
     rows = await cursor.fetchall()
     today_str = datetime.now().strftime('%Y-%m-%d')
 
@@ -284,8 +303,24 @@ async def get_storico_oggi(mittente: str) -> str:
     async with get_db_connection() as db:
         row = await _trova_ordine_esistente_per_data(db, mittente, target_data_consegna)
         if not row:
+            row = await _trova_ordine_esistente_per_data(db, mittente, None)
+        if not row:
             return ""
-        return row[1] 
+        
+        testo_orig = row[1]
+        dati_raw = row[2]
+        dati_json = parse_dati_estratti_ia(dati_raw)
+        prodotti = dati_json.get("prodotti", [])
+        
+        prod_riepilogo = []
+        for p in prodotti:
+            nome = p.get("nome_articolo", "") or p.get("codice_articolo", "")
+            qta = p.get("quantita", 1)
+            um = p.get("unita_di_misura", "kg")
+            prod_riepilogo.append(f"{qta} {um} {nome}")
+            
+        dettaglio_prodotti = f" (Prodotti attuali già registrati: {', '.join(prod_riepilogo)})" if prod_riepilogo else ""
+        return f"{testo_orig}{dettaglio_prodotti}"
 
 async def ordine_esiste_in_db(mittente: str, testo: str, time_str: Optional[str] = None) -> bool:
     async with get_db_connection() as db:
@@ -337,8 +372,8 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             existing_row = await cursor.fetchone()
             if existing_row:
                 old_dati = parse_dati_estratti_ia(existing_row[1])
-                # Non sovrascrivere ordini modificati manualmente o già confermati/consegnati
-                if old_dati.get("modificato_manualmente") or old_dati.get("stato_ordine") in ["CONFERMATO", "CONSEGNATO"]:
+                # Non sovrascrivere ordini già confermati/consegnati
+                if old_dati.get("stato_ordine") in ["CONFERMATO", "CONSEGNATO"]:
                     return
                 await db.execute(
                     "UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?",
@@ -347,7 +382,30 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
                 await db.commit()
                 return
 
-        # INSERISCE COME NUOVO ORDINE SE NON È UN DUPLICATO
+        # AGGIUNTA / RETTIFICA SU ORDINE ESISTENTE (per lo stesso cliente e data consegna)
+        existing_order_row = await _trova_ordine_esistente_per_data(db, mittente_finale, corrected_date)
+        if existing_order_row:
+            target_id, old_testo, old_dati_raw, _ = existing_order_row
+            old_dati = parse_dati_estratti_ia(old_dati_raw)
+            
+            # Se l'ordine precedente è già stato finalizzato/consegnato, non sovrascrivere ma crea nuovo
+            if old_dati.get("stato_ordine") not in ["CONFERMATO", "CONSEGNATO"]:
+                # Unisce il testo originale con il nuovo per trasparenza nel cartellino ordine
+                if nuovo_messaggio.strip() not in old_testo:
+                    time_label = now_str[11:16] if len(now_str) >= 16 else ""
+                    tag = f" [AGGIUNTA/RETTIFICA {time_label}]" if time_label else " [AGGIUNTA/RETTIFICA]"
+                    testo_aggiornato = f"{old_testo}\n➕{tag}: {nuovo_messaggio}"
+                else:
+                    testo_aggiornato = old_testo
+
+                await db.execute(
+                    "UPDATE ordini SET mittente = ?, testo_originale = ?, dati_estratti_ia = ?, data_ricezione = ? WHERE id = ?",
+                    (mittente_finale, testo_aggiornato, dati_estratti, now_str, target_id)
+                )
+                await db.commit()
+                return
+
+        # INSERISCE COME NUOVO ORDINE SE NON ESISTE UN ORDINE PRECEDENTE DA AGGIORNARE
         await db.execute(
             "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
             (mittente_finale, nuovo_messaggio, dati_estratti, now_str)

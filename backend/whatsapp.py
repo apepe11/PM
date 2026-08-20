@@ -39,7 +39,7 @@ ai_parser = AIParser(base_dir="catalogo")
 # ---------------------------------------------------------
 # 📦 DEBOUNCING MESSAGGI "A RATE"
 # ---------------------------------------------------------
-DEBOUNCE_SECONDS = float(os.environ.get("WHATSAPP_DEBOUNCE_SECONDS", "12"))
+DEBOUNCE_SECONDS = float(os.environ.get("WHATSAPP_DEBOUNCE_SECONDS", "20"))
 message_buffers: dict = {}  # mittente -> {"testi": [...], "msg_raw": ..., "data_ricezione_custom": ..., "timer_task": Task}
 
 WHATSAPP_STATE = {
@@ -155,21 +155,11 @@ async def invia_messaggio_whatsapp(destinatario_o_numero: str, testo: str) -> bo
         add_whatsapp_log(f"❌ Eccezione invio WhatsApp Evolution: {e}", "ERROR")
         return False
 
-async def _loop_sincronizzazione_periodica() -> None:
-    while True:
-        try:
-            if not is_licenza_attiva():
-                pass
-            elif WHATSAPP_STATE.get("stato_connessione") == "CONNESSO":
-                await controlla_nuovi_messaggi_whatsapp()
-        except Exception as e:
-            add_whatsapp_log(f"⚠️ Errore controllo messaggi 10s: {e}", "WARN")
-        await asyncio.sleep(10) # Controllo tassativo ogni 10 secondi
-
+# Sincronizzazione periodica / fetch storico disattivata:
+# Il sistema opera esclusivamente in tempo reale via Webhook per non consumare chiamate IA
 def avvia_loop_sincronizzazione_periodica() -> None:
-    global _sync_loop_task
-    if _sync_loop_task is None or _sync_loop_task.done():
-        _sync_loop_task = asyncio.create_task(_loop_sincronizzazione_periodica())
+    """Disattivato: l'elaborazione avviene esclusivamente in tempo reale via webhook."""
+    pass
 
 async def avvia_whatsapp() -> None:
     add_whatsapp_log("🚀 Connessione al motore Evolution API in corso...", "INFO")
@@ -185,7 +175,6 @@ async def avvia_whatsapp() -> None:
 
                 await _configura_webhook_evolution()
                 asyncio.create_task(_sincronizza_rubrica_evolution())
-                avvia_loop_sincronizzazione_periodica()
                 return
             else:
                 WHATSAPP_STATE["stato_connessione"] = "IN_ATTESA_QR"
@@ -343,103 +332,14 @@ def _estrai_lista_evolution(data, chiave: Optional[str] = None) -> list:
     return []
 
 async def controlla_nuovi_messaggi_whatsapp() -> None:
-    """Controlla le chat ogni 10s per identificare nuovi messaggi recenti non ancora elaborati (finestra ultimi 5 minuti)."""
-    if not is_licenza_attiva() or WHATSAPP_STATE.get("stato_connessione") != "CONNESSO":
-        return
-
-    # Finestra di sicurezza per i messaggi non ancora elaborati di oggi
-    recent_timestamp_limit = (datetime.now() - timedelta(hours=18)).timestamp()
-
-    try:
-        res = requests.post(f"{EVOLUTION_URL}/chat/findChats/{INSTANCE_NAME}", json={}, headers=_req_headers(), timeout=5)
-        if res.status_code != 200:
-            return
-
-        chats = _estrai_lista_evolution(res.json(), "chats")
-        if not chats:
-            return
-
-        for c in chats:
-            remote_jid = c.get("remoteJid") or c.get("id")
-            if not remote_jid or "@g.us" in remote_jid:
-                continue
-
-            msg_res = requests.post(
-                f"{EVOLUTION_URL}/chat/findMessages/{INSTANCE_NAME}",
-                json={"where": {"key": {"remoteJid": remote_jid}}, "limit": 5},
-                headers=_req_headers(),
-                timeout=5
-            )
-            if msg_res.status_code != 200:
-                continue
-
-            messages = _estrai_lista_evolution(msg_res.json(), "messages")
-            if not messages:
-                continue
-
-            for msg in messages:
-                try:
-                    if msg.get("key", {}).get("fromMe") is True:
-                        continue
-
-                    timestamp_raw = msg.get("messageTimestamp", 0)
-                    try:
-                        timestamp = float(timestamp_raw)
-                    except (TypeError, ValueError):
-                        timestamp = 0
-
-                    # Salta categoricamente i messaggi più vecchi di 5 minuti
-                    if timestamp < recent_timestamp_limit:
-                        continue
-
-                    msg_id = msg.get("key", {}).get("id", "")
-                    if not msg_id or await is_messaggio_elaborato(msg_id):
-                        continue
-
-                    testo = ""
-                    is_vocal = False
-                    msg_content = msg.get("message", {}) or {}
-                    if "conversation" in msg_content:
-                        testo = msg_content["conversation"]
-                    elif "extendedTextMessage" in msg_content:
-                        testo = msg_content["extendedTextMessage"].get("text", "")
-                    elif "audioMessage" in msg_content:
-                        is_vocal = True
-                        testo = "Vocale o Media"
-                    elif "imageMessage" in msg_content:
-                        testo = msg_content["imageMessage"].get("caption", "Immagine")
-
-                    if not testo and not is_vocal:
-                        continue
-
-                    key = msg.get("key", {})
-                    remote_jid_alt = key.get("remoteJidAlt", "")
-                    phone_number = remote_jid_alt.split("@")[0] if remote_jid_alt else remote_jid.split("@")[0]
-                    nome_finale = _trova_nome_in_rubrica_locale(phone_number)
-                    if not nome_finale:
-                        nome_finale = _estrai_nome_contatto(msg, phone_number)
-                    if not nome_finale:
-                        nome_finale = _forza_ricerca_nome_evolution(remote_jid, phone_number)
-
-                    mittente = f"{nome_finale} (+{phone_number})" if nome_finale else f"(+{phone_number})"
-                    data_ricezione_custom = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') if timestamp else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                    # Segna subito come elaborato
-                    await segna_messaggio_elaborato(msg_id)
-
-                    add_whatsapp_log(f"📥 [Nuovo Messaggio 10s] Ricevuto da {mittente}: {testo[:50]}", "INFO")
-                    await _accoda_messaggio_utente(mittente, testo, is_vocal, msg, data_ricezione_custom)
-
-                except Exception:
-                    continue
-
-        WHATSAPP_STATE["ultima_sincronizzazione_periodica"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-
-    except Exception:
-        pass
+    """Disattivato: il recupero e pull dei messaggi storici è stato disabilitato per preservare le chiamate IA.
+    Il sistema riceve ed elabora esclusivamente i nuovi messaggi in tempo reale tramite Webhook.
+    """
+    pass
 
 async def sincronizza_chat_recenti_background() -> None:
-    await controlla_nuovi_messaggi_whatsapp()
+    """Disattivato: nessun recupero dello storico chat."""
+    pass
 
 async def elabora_webhook_evolution(payload: dict) -> None:
     if not is_licenza_attiva():
@@ -472,7 +372,6 @@ async def elabora_webhook_evolution(payload: dict) -> None:
                 WHATSAPP_STATE["data_connessione"] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
                 add_whatsapp_log("🟢 WHATSAPP BANCO CONNESSO ED ATTIVO VIA EVOLUTION!", "SUCCESS")
                 asyncio.create_task(_sincronizza_rubrica_evolution())
-                avvia_loop_sincronizzazione_periodica()
         elif state == "close":
             if WHATSAPP_STATE.get("stato_connessione") != "DISCONNESSO":
                 WHATSAPP_STATE["stato_connessione"] = "DISCONNESSO"
@@ -520,8 +419,17 @@ async def elabora_webhook_evolution(payload: dict) -> None:
                 elif "audioMessage" in msg_content:
                     is_vocal = True
                     testo = "Vocale o Media"
+                elif "documentMessage" in msg_content and "audio" in str(msg_content["documentMessage"].get("mimetype", "")).lower():
+                    is_vocal = True
+                    testo = "Vocale o Media"
                 elif "imageMessage" in msg_content:
                     testo = msg_content["imageMessage"].get("caption", "Immagine")
+            
+            # Check per messageType di Evolution API
+            msg_type_str = str(msg.get("messageType", "")).lower()
+            if msg_type_str in ["audiomessage", "ptt", "voice"]:
+                is_vocal = True
+                testo = testo or "Vocale o Media"
             
             if not testo and not is_vocal:
                 continue
@@ -543,21 +451,52 @@ async def elabora_webhook_evolution(payload: dict) -> None:
             asyncio.create_task(_accoda_messaggio_utente(mittente, testo, is_vocal, msg, data_ricezione_custom))
 
 def scarica_media_evolution(message_obj: dict) -> Optional[dict]:
-    message_type = message_obj.get("messageType", "")
-    if message_type not in ["audioMessage", "documentMessage"]:
-        return None
-        
-    payload = { "message": message_obj.get("message") }
-    try:
-        res = requests.post(f"{EVOLUTION_URL}/chat/getBase64FromMediaMessage/{INSTANCE_NAME}", json=payload, headers=_req_headers(), timeout=15)
-        if res.status_code == 200:
-            data = res.json()
-            return {
-                "base64": data.get("base64"),
-                "mimeType": data.get("mimetype", "audio/ogg")
-            }
-    except Exception as e:
-        add_whatsapp_log(f"⚠️ Errore download media da Evolution: {e}", "ERROR")
+    # 1. Se il base64 è già fornito direttamente nel payload del messaggio
+    b64_incluso = message_obj.get("base64")
+    if not b64_incluso and isinstance(message_obj.get("data"), dict):
+        b64_incluso = message_obj["data"].get("base64")
+    if b64_incluso:
+        if "," in b64_incluso:
+            b64_incluso = b64_incluso.split(",", 1)[1]
+        mime = message_obj.get("mimetype") or message_obj.get("mimeType") or "audio/ogg"
+        return {"base64": b64_incluso, "mimeType": mime}
+
+    # 2. Rileva se è un messaggio audio o documento audio
+    msg_dict = message_obj.get("message", {}) if isinstance(message_obj.get("message"), dict) else {}
+    msg_type = message_obj.get("messageType", "")
+    if not msg_type:
+        if "audioMessage" in msg_dict:
+            msg_type = "audioMessage"
+        elif "documentMessage" in msg_dict:
+            msg_type = "documentMessage"
+
+    # 3. Tenta il recupero del file audio tramite Evolution API
+    payloads = [
+        {"message": message_obj, "convertToMp4": False},
+        {"message": msg_dict, "convertToMp4": False}
+    ]
+    for payload in payloads:
+        try:
+            res = requests.post(
+                f"{EVOLUTION_URL}/chat/getBase64FromMediaMessage/{INSTANCE_NAME}",
+                json=payload,
+                headers=_req_headers(),
+                timeout=15
+            )
+            if res.status_code in [200, 201]:
+                data = res.json()
+                b64 = data.get("base64") or ""
+                if b64:
+                    if "," in b64:
+                        b64 = b64.split(",", 1)[1]
+                    mime = data.get("mimetype") or data.get("mimeType") or "audio/ogg"
+                    return {
+                        "base64": b64,
+                        "mimeType": mime
+                    }
+        except Exception as e:
+            add_whatsapp_log(f"⚠️ Errore download media da Evolution: {e}", "WARN")
+
     return None
 
 def _is_titolare_andrea(mittente: str) -> bool:
@@ -643,9 +582,13 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
 
     dt_msg = datetime.strptime(data_ricezione_custom, '%Y-%m-%d %H:%M:%S')
 
+    is_andrea_mittente = _is_titolare_andrea(mittente)
+    storico_di_oggi = "" if is_andrea_mittente else await get_storico_oggi(mittente)
+
     risultato_ia = await ai_parser.parse_message(
         testo,
         client_name=mittente,
+        storico_oggi=storico_di_oggi,
         audio_data=audio_data,
         mime_type=mime_type,
         message_timestamp=dt_msg
@@ -716,6 +659,4 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
 
 async def forzare_scansione_chat() -> dict:
     await _configura_webhook_evolution()
-    asyncio.create_task(sincronizza_chat_recenti_background())
-    avvia_loop_sincronizzazione_periodica()
-    return {"status": "ok", "message": "Sincronizzazione avviata."}
+    return {"status": "ok", "message": "Webhook riconfigurato con successo. Ricezione in tempo reale attiva."}

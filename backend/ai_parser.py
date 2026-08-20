@@ -117,6 +117,17 @@ def estrai_cliente_reale(text_to_parse: str, client_name: str, message_timestamp
             
     return cliente_finale
 
+def normalizza_nome(nome: str) -> str:
+    """Pulisce e uniforma il nome del cliente rimuovendo punteggiatura, spazi doppi e applicando title-case."""
+    if not nome or not str(nome).strip():
+        return "Sconosciuto"
+    # Rimuove caratteri speciali/punteggiatura all'inizio e alla fine (preservando lettere accentate e parentesi)
+    nome_pulito = re.sub(r'^[^\w\(\)]+|[^\w\(\)]+$', '', str(nome))
+    if not nome_pulito.strip():
+        return "Sconosciuto"
+    # Rimuove gli spazi doppi e mette la Maiuscola ad ogni parola (es. "mario  rossi " -> "Mario Rossi")
+    return " ".join(nome_pulito.split()).title()
+
 
 class AIParser:
     def __init__(self, base_dir="catalogo"):
@@ -280,11 +291,14 @@ class AIParser:
         
         for ord_obj in ordini_array:
             # Estrazione unificata del cliente reale
-            cliente_gemini = ord_obj.get("cliente_reale", "").strip()
+            cliente_gemini = str(ord_obj.get("cliente_reale", "")).strip()
             if cliente_gemini and cliente_gemini.lower() not in ["null", "none", "sconosciuto"]:
-                ord_obj["cliente_id"] = cliente_gemini
+                nome_grezzo = cliente_gemini
             else:
-                ord_obj["cliente_id"] = estrai_cliente_reale(text_to_parse, client_name, message_timestamp)
+                nome_grezzo = estrai_cliente_reale(text_to_parse, client_name, message_timestamp)
+
+            # APPLICA LA NORMALIZZAZIONE QUI
+            ord_obj["cliente_id"] = normalizza_nome(nome_grezzo)
 
             prodotti_parsed = ord_obj.get("prodotti", [])
             for p in prodotti_parsed:
@@ -353,7 +367,7 @@ class AIParser:
                 "testo_trascritto": "",
                 "ordini": [{
                     "is_order": False,
-                    "cliente_id": client_name,
+                    "cliente_id": normalizza_nome(estrai_cliente_reale(text_to_parse, client_name, message_timestamp)),
                     "prodotti": [],
                     "note_ordine": "Messaggio di cortesia o informativo.",
                     "da_verificare_manualmente": False
@@ -380,8 +394,8 @@ class AIParser:
                 now = time.time()
                 elapsed = now - LAST_GEMINI_REQUEST_TIME
                 
-                # Pacing intelligente: 3 secondi tra richieste (grazie alla rotazione su 4 modelli, ogni singolo modello non supera mai i limiti)
-                min_pacing = 3.0 
+                # Pacing immediato (grazie alla rotazione ciclica su 4 modelli Gemini)
+                min_pacing = 0.5 
                 if elapsed < min_pacing:
                     await asyncio.sleep(min_pacing - elapsed)
                 LAST_GEMINI_REQUEST_TIME = time.time()
@@ -545,7 +559,8 @@ class AIParser:
         is_canc = bool(re.search(r'\b(?:annulla|cancella|disdici|elimina|non portarmi|non mi serve)\b', t_lower, re.IGNORECASE))
         
         # CHIAMATA UNIFICATA AL CLIENTE REALE
-        cliente_finale = estrai_cliente_reale(text_to_parse, client_name, message_timestamp)
+        cliente_grezzo = estrai_cliente_reale(text_to_parse, client_name, message_timestamp)
+        cliente_finale = normalizza_nome(cliente_grezzo) # <--- FILTRO APPLICATO
 
         # Non generiamo ordini automatici dal parser locale: salviamo come messaggio da verificare
         singolo_ordine = {

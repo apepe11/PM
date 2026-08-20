@@ -228,7 +228,6 @@ export default function App() {
   const [reprocessingOrderId, setReprocessingOrderId] = useState(null);
 
   const handleReprocessOrder = async (id_ordine) => {
-    if (!window.confirm(`Vuoi rielaborare l'ordine #${id_ordine} con l'IA?`)) return;
     setReprocessingOrderId(id_ordine);
     showToast(`🧠 Rielaborazione ordine #${id_ordine} con l'IA in corso...`);
     try {
@@ -236,7 +235,7 @@ export default function App() {
       const data = await res.json();
       if (res.ok) {
         showToast(data.message || `✅ Ordine #${id_ordine} rielaborato con successo!`);
-        fetchDashboardData();
+        await fetchDashboardData();
       } else {
         showToast(data.detail || data.message || "Errore durante la rielaborazione dell'ordine", 'error');
       }
