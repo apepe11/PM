@@ -974,6 +974,16 @@ def is_burrata_articolo(codice: str, nome: str) -> bool:
     n = str(nome or "").lower()
     return "burrat" in c or "burrat" in n or "burat" in c or "burat" in n or "burpist" in c
 
+def is_sfoglia_articolo(codice: str, nome: str) -> bool:
+    """Verifica se l'articolo è una sfoglia di mozzarella (classica o senza lattosio / delat)."""
+    c = str(codice or "").lower()
+    n = str(nome or "").lower()
+    return "sfoglia" in c or "sfoglia" in n
+
+def is_articolo_calcolo_a_pezzi(codice: str, nome: str) -> bool:
+    """Verifica se l'articolo va calcolato a PEZZI per la distinta di produzione casaro."""
+    return is_burrata_articolo(codice, nome) or is_sfoglia_articolo(codice, nome)
+
 def get_peso_unitario_articolo(codice: str, nome: str) -> float:
     cod = str(codice or "").strip()
     if cod in PRODOTTI_MAP and PRODOTTI_MAP[cod].get("peso_unitario") is not None:
@@ -984,6 +994,8 @@ def get_peso_unitario_articolo(codice: str, nome: str) -> float:
     w = estrai_peso_unitario_da_nome(nome)
     if w > 0:
         return w
+    if is_sfoglia_articolo(codice, nome):
+        return 0.5
     return 0.25
 
 async def get_produzione_aggregata(data_target: Optional[str] = None):
@@ -1007,8 +1019,8 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
             qta = float(p.get("quantita", 0))
             um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()
 
-            # La burrata va SEMPRE calcolata a PEZZI per la produzione
-            if is_burrata_articolo(cod, nome):
+            # Gli articoli come burrata e sfoglia vanno SEMPRE calcolati a PEZZI per la produzione casaro
+            if is_articolo_calcolo_a_pezzi(cod, nome):
                 um = "pezzi"
                 p_um = (p.get("unita_di_misura") or "").lower()
                 if p_um == "kg":
@@ -1016,7 +1028,7 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
                     if peso_un > 0:
                         qta = round(qta / peso_un)
                     else:
-                        qta = round(qta / 0.25)
+                        qta = round(qta / 0.5) if is_sfoglia_articolo(cod, nome) else round(qta / 0.25)
                 else:
                     qta = round(qta)
 
@@ -1093,8 +1105,8 @@ async def get_produzione_aggregata_sole(data_target: Optional[str] = None):
             qta = float(p.get("quantita", 0))
             um = (p.get("unita_di_misura") or PRODOTTI_MAP.get(cod, {}).get("unita_misura") or "kg").lower()
 
-            # La burrata va SEMPRE calcolata a PEZZI per la produzione
-            if is_burrata_articolo(cod, nome):
+            # Gli articoli come burrata e sfoglia vanno SEMPRE calcolati a PEZZI per la produzione casaro
+            if is_articolo_calcolo_a_pezzi(cod, nome):
                 um = "pezzi"
                 p_um = (p.get("unita_di_misura") or "").lower()
                 if p_um == "kg":
@@ -1102,7 +1114,7 @@ async def get_produzione_aggregata_sole(data_target: Optional[str] = None):
                     if peso_un > 0:
                         qta = round(qta / peso_un)
                     else:
-                        qta = round(qta / 0.25)
+                        qta = round(qta / 0.5) if is_sfoglia_articolo(cod, nome) else round(qta / 0.25)
                 else:
                     qta = round(qta)
 
