@@ -288,6 +288,8 @@ def _trova_nome_in_rubrica_locale(phone_number: str) -> str:
                 continue
             if nome_cli.lower() in ["cliente", "cliente whatsapp", "wa user", ""]:
                 continue
+            if "ciccio brown" in nome_cli.lower():
+                return "Agriturismo Vignola"
                 
             return nome_cli
     return ""
@@ -306,6 +308,9 @@ def _estrai_nome_contatto(msg: dict, phone_number: str) -> str:
     if name.lower() in ["cliente whatsapp", "wa user", "whatsapp"]:
         return ""
 
+    if "ciccio brown" in name.lower():
+        return "Agriturismo Vignola"
+
     return name
 
 def _forza_ricerca_nome_evolution(remote_jid: str, phone_number: str) -> str:
@@ -323,6 +328,8 @@ def _forza_ricerca_nome_evolution(remote_jid: str, phone_number: str) -> str:
                 nome = contatto.get("name") or contatto.get("pushName") or contatto.get("verifiedName") or ""
                 nome_pulito = str(nome).strip()
                 if nome_pulito and _normalizza_telefono(nome_pulito) != _normalizza_telefono(phone_number):
+                    if "ciccio brown" in nome_pulito.lower():
+                        return "Agriturismo Vignola"
                     return nome_pulito
     except Exception:
         pass

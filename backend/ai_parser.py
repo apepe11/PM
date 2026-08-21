@@ -115,16 +115,22 @@ def estrai_cliente_reale(text_to_parse: str, client_name: str, message_timestamp
             dt_sicura = message_timestamp or datetime.now()
             cliente_finale = f"Cliente Non Specificato ({dt_sicura.strftime('%H:%M:%S')})"
             
+    if "ciccio brown" in cliente_finale.lower():
+        cliente_finale = "Agriturismo Vignola"
     return cliente_finale
 
 def normalizza_nome(nome: str) -> str:
     """Pulisce e uniforma il nome del cliente rimuovendo punteggiatura, spazi doppi e applicando title-case."""
     if not nome or not str(nome).strip():
         return "Sconosciuto"
+    if "ciccio brown" in str(nome).lower():
+        return "Agriturismo Vignola"
     # Rimuove caratteri speciali/punteggiatura all'inizio e alla fine (preservando lettere accentate e parentesi)
     nome_pulito = re.sub(r'^[^\w\(\)]+|[^\w\(\)]+$', '', str(nome))
     if not nome_pulito.strip():
         return "Sconosciuto"
+    if "ciccio brown" in nome_pulito.lower():
+        return "Agriturismo Vignola"
     # Rimuove gli spazi doppi e mette la Maiuscola ad ogni parola (es. "mario  rossi " -> "Mario Rossi")
     return " ".join(nome_pulito.split()).title()
 
@@ -144,6 +150,10 @@ class AIParser:
             if cod_art:
                 self.synonyms_map[cod_art] = item.get("s", "")
                 
+        self.client_rules = self._load_json(particolarita_path, [])
+
+    def reload_client_rules(self):
+        particolarita_path = get_persistent_path(os.path.join("catalogo", "particolarita_clienti.json"))
         self.client_rules = self._load_json(particolarita_path, [])
 
     def _load_json(self, file_path: str, default_value: Any) -> Any:

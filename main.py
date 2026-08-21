@@ -31,6 +31,8 @@ from backend.db import (
     get_filoni_per_cliente,
     get_lista_clienti_registrati,
     aggiorna_confezionamento_ordine,
+    aggiorna_prodotto_singolo_ordine,
+    aggiorna_prodotti_parziali_ordine,
     sblocca_ordine_confezionamento,
     conferma_ordine,
     consegna_ordine,
@@ -621,6 +623,33 @@ async def delete_particolarita_cliente(index: int):
     rimosso = clienti.pop(index)
     _salva_particolarita_json(clienti)
     return {"status": "success", "message": f"Cliente '{rimosso.get('n', '')}' rimosso dal file JSON.", "total": len(clienti)}
+
+# --- SALVATAGGIO SINGOLA RIGA PRODOTTO / LOTTI PARZIALI (TABLET) ---
+@app.put("/api/ordini/{id_ordine}/prodotti/{index_prodotto}")
+@app.patch("/api/ordini/{id_ordine}/prodotti/{index_prodotto}")
+async def update_singolo_prodotto_ordine(id_ordine: int, index_prodotto: int, payload: dict = Body(...)):
+    success = await aggiorna_prodotto_singolo_ordine(id_ordine, index_prodotto, payload)
+    if not success:
+        raise HTTPException(status_code=404, detail="Ordine o prodotto non trovato")
+    return {"status": "success", "message": "Prodotto aggiornato con successo."}
+
+@app.put("/api/ordini/{id_ordine}/prodotti")
+@app.patch("/api/ordini/{id_ordine}/prodotti")
+@app.put("/api/ordini/{id_ordine}/prodotto")
+@app.patch("/api/ordini/{id_ordine}/prodotto")
+async def update_prodotti_parziali_ordine_endpoint(id_ordine: int, payload: dict = Body(...)):
+    prodotti = payload.get("prodotti")
+    if prodotti is not None:
+        success = await aggiorna_prodotti_parziali_ordine(id_ordine, prodotti)
+    elif "index" in payload and "prodotto" in payload:
+        success = await aggiorna_prodotto_singolo_ordine(id_ordine, payload["index"], payload["prodotto"])
+    elif "prodotto" in payload:
+        success = await aggiorna_prodotto_singolo_ordine(id_ordine, 0, payload["prodotto"])
+    else:
+        success = await aggiorna_prodotti_parziali_ordine(id_ordine, [payload])
+    if not success:
+        raise HTTPException(status_code=404, detail="Ordine o prodotto non trovato")
+    return {"status": "success", "message": "Prodotti aggiornati con successo."}
 
 # --- MODIFICA FONDAMENTALE: L'API prende una lista di prodotti pesati ---
 @app.put("/api/ordini/{id_ordine}/confezione")

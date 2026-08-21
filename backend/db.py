@@ -344,6 +344,10 @@ async def salva_o_aggiorna_ordine(mittente: str, nuovo_messaggio: str, dati_estr
             dati_json = {}
 
         mittente_finale = dati_json.get("cliente_id", mittente)
+        if "ciccio brown" in str(mittente_finale).lower():
+            mittente_finale = "Agriturismo Vignola"
+            dati_json["cliente_id"] = "Agriturismo Vignola"
+            dati_estratti = json.dumps(dati_json, ensure_ascii=False)
 
         corrected_date = await normalize_data_consegna(dati_json.get("data_consegna"), now_str)
         if corrected_date and dati_json.get("data_consegna") != corrected_date:
@@ -430,6 +434,80 @@ def estrai_peso_unitario_da_nome(nome_o_codice: str) -> float:
         except ValueError:
             pass
     return 0.0
+
+async def aggiorna_prodotti_parziali_ordine(id_ordine: int, prodotti_aggiornati: list):
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
+        row = await cursor.fetchone()
+        if not row:
+            return False
+            
+        dati_raw = row[0]
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
+
+        peso_totale = 0.0
+        lotto_generico = ""
+        for p in prodotti_aggiornati:
+            if not p.get("is_peso_fisso"):
+                try:
+                    g_str = str(p.get("grammatura", "0")).replace(',', '.').replace('KG', '').replace('kg', '').strip()
+                    val = float(g_str)
+                    um = (p.get("unita_di_misura") or "kg").lower()
+                    
+                    if um in ["pezzi", "pz", "coppia", "coppie"]:
+                        qta = float(p.get("quantita", 1.0))
+                        peso_totale += (val * qta)
+                    else:
+                        peso_totale += val
+                except ValueError:
+                    pass
+            if p.get("numero_lotto") and not lotto_generico:
+                lotto_generico = p.get("numero_lotto")
+
+        dati_parsed["prodotti"] = prodotti_aggiornati
+        if peso_totale > 0:
+            dati_parsed["peso_reale"] = round(peso_totale, 3)
+        if lotto_generico and not dati_parsed.get("numero_lotto"):
+            dati_parsed["numero_lotto"] = lotto_generico
+
+        await db.execute(
+            "UPDATE ordini SET dati_estratti_ia = ? WHERE id = ?",
+            (json.dumps(dati_parsed, ensure_ascii=False), id_ordine)
+        )
+        await db.commit()
+        return True
+
+async def aggiorna_prodotto_singolo_ordine(id_ordine: int, index_prodotto: int, dati_prodotto: dict):
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
+        row = await cursor.fetchone()
+        if not row:
+            return False
+            
+        dati_raw = row[0]
+        dati_parsed = parse_dati_estratti_ia(dati_raw)
+
+        # Se il payload include già la lista completa aggiornata dei prodotti dell'ordine
+        if isinstance(dati_prodotto, dict) and "prodotti" in dati_prodotto and isinstance(dati_prodotto["prodotti"], list):
+            return await aggiorna_prodotti_parziali_ordine(id_ordine, dati_prodotto["prodotti"])
+
+        prodotti = dati_parsed.get("prodotti", [])
+        if index_prodotto >= len(prodotti):
+            prodotti = scomponi_prodotti_pezzi(prodotti)
+
+        if index_prodotto < 0 or index_prodotto >= len(prodotti):
+            return False
+
+        prod_esistente = dict(prodotti[index_prodotto])
+        prodotto_dati = dati_prodotto.get("prodotto") if isinstance(dati_prodotto, dict) and "prodotto" in dati_prodotto else dati_prodotto
+
+        if isinstance(prodotto_dati, dict):
+            for k, v in prodotto_dati.items():
+                if k not in ["pezzo_index", "pezzi_totali"]:
+                    prod_esistente[k] = v
+        prodotti[index_prodotto] = prod_esistente
+
+        return await aggiorna_prodotti_parziali_ordine(id_ordine, prodotti)
 
 async def aggiorna_confezionamento_ordine(id_ordine: int, prodotti_aggiornati: list):
     async with get_db_connection() as db:
@@ -672,7 +750,7 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
                 "testo_originale": testo_orig
             })
 
-            is_filoni_rec = is_cliente_mulnar(mittente) or ("franzoli" in str(mittente).lower() or "fronzaroli" in str(mittente).lower())
+            is_filoni_rec = is_cliente_mulnar(mittente) or is_cliente_vignola(mittente) or ("franzoli" in str(mittente).lower() or "fronzaroli" in str(mittente).lower())
             if not is_filoni_rec:
                 for p in prodotti:
                     p_nome = (p.get("nome_articolo") or p.get("codice_articolo") or "").lower()
@@ -707,6 +785,10 @@ async def get_tutti_ordini(data_filtro: Optional[str] = None, scomponi_pezzi: bo
         return ordini_lista
 
 async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", data_consegna: Optional[str] = None):
+    mittente_pulito = str(mittente or "").strip()
+    if "ciccio brown" in mittente_pulito.lower():
+        mittente_pulito = "Agriturismo Vignola"
+
     if not data_consegna:
         data_consegna = await get_data_attiva()
     else:
@@ -728,7 +810,7 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
         "prodotti": prodotti,
         "note_ordine": note,
         "da_verificare_manualmente": False,
-        "cliente_id": mittente
+        "cliente_id": mittente_pulito
     }
     testo_orig = f"[Inserimento Manuale Dashboard] {note}".strip()
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -736,12 +818,14 @@ async def crea_ordine_manuale(mittente: str, prodotti: list, note: str = "", dat
     async with get_db_connection() as db:
         cursor = await db.execute(
             "INSERT INTO ordini (mittente, testo_originale, dati_estratti_ia, data_ricezione) VALUES (?, ?, ?, ?)",
-            (mittente, testo_orig, json.dumps(dati_ia, ensure_ascii=False), now_str)
+            (mittente_pulito, testo_orig, json.dumps(dati_ia, ensure_ascii=False), now_str)
         )
         await db.commit()
         return cursor.lastrowid
 
 async def aggiorna_ordine(id_ordine: int, prodotti: list, note: str = "", data_consegna: Optional[str] = None, mittente: Optional[str] = None):
+    if mittente and "ciccio brown" in str(mittente).lower():
+        mittente = "Agriturismo Vignola"
     async with get_db_connection() as db:
         cursor = await db.execute("SELECT mittente, testo_originale, dati_estratti_ia FROM ordini WHERE id = ?", (id_ordine,))
         row = await cursor.fetchone()
@@ -1042,6 +1126,11 @@ def is_cliente_mulnar(mittente: str) -> bool:
         if num in m_clean or num in m:
             return True
     return False
+
+def is_cliente_vignola(mittente: str) -> bool:
+    """Verifica se il mittente corrisponde ad Agriturismo Vignola (o Ciccio Brown)."""
+    m = str(mittente or "").lower()
+    return "vignola" in m or "ciccio brown" in m
 
 def is_burrata_articolo(codice: str, nome: str) -> bool:
     """Verifica se l'articolo è una burrata di qualsiasi tipologia (classica, tartufo, pistacchio, ecc.)."""
@@ -1397,12 +1486,13 @@ async def get_filoni_per_cliente(data_target: Optional[str] = None):
 
         mittente = o.get("mittente", "")
         is_mulnar = is_cliente_mulnar(mittente)
+        is_vignola = is_cliente_vignola(mittente)
 
         filoni_cliente = []
         for p in o.get("prodotti", []):
             nome = (p.get("nome_articolo") or p.get("codice_articolo") or "").lower()
             cod = (p.get("codice_articolo") or "").lower()
-            if "filon" in nome or "filon" in cod or "panetto" in nome or "pizza" in nome or "julienne" in nome or "tagju" in cod or is_mulnar:
+            if is_vignola or is_mulnar or "filon" in nome or "filon" in cod or "panetto" in nome or "pizza" in nome or "julienne" in nome or "tagju" in cod:
                 filoni_cliente.append(p)
         
         if filoni_cliente:

@@ -36,7 +36,7 @@ const isSoleOrder = (ord) => {
 const isFiloniOrder = (ord) => {
   if (ord.is_filoni !== undefined && ord.is_filoni !== null) return Boolean(ord.is_filoni);
   const m = (ord.mittente || '').toLowerCase();
-  if (m.includes('mulnar') || m.includes('franzoli') || m.includes('fronzaroli')) return true;
+  if (m.includes('mulnar') || m.includes('franzoli') || m.includes('fronzaroli') || m.includes('vignola') || m.includes('ciccio brown')) return true;
   return (ord.prodotti || []).some(p => {
     const nome = (p.nome_articolo || p.codice_articolo || '').toLowerCase();
     const cod = (p.codice_articolo || '').toLowerCase();
@@ -74,8 +74,10 @@ export default function PostazioneTablet() {
             
             nextForm[o.id] = (o.prodotti || []).map((p, idx) => {
               const prevP = prevProds[idx];
-              // Se l'ordine non è ancora confezionato, preserva i campi digitati localmente
-              if (!isConfezionato && prevP) {
+              const isItemConfirmedInDb = p.confermato === true || p.is_confermato === true;
+
+              // Se l'ordine non è ancora confezionato e non confermato da DB, preserva i campi digitati localmente
+              if (!isConfezionato && !isItemConfirmedInDb && prevP) {
                 return {
                   ...p,
                   numero_lotto: prevP.numero_lotto !== undefined && prevP.numero_lotto !== '' ? prevP.numero_lotto : (p.numero_lotto || ''),
@@ -97,15 +99,13 @@ export default function PostazioneTablet() {
           const nextConfirmed = { ...prev };
           data.forEach(o => {
             const isConfezionato = o.stato_confezionamento === 'CONFEZIONATO';
-            if (isConfezionato) {
-              const orderConf = {};
-              (o.prodotti || []).forEach((_, idx) => {
+            const orderConf = { ...(prev[o.id] || {}) };
+            (o.prodotti || []).forEach((p, idx) => {
+              if (isConfezionato || p.confermato === true || p.is_confermato === true) {
                 orderConf[idx] = true;
-              });
-              nextConfirmed[o.id] = orderConf;
-            } else if (!nextConfirmed[o.id]) {
-              nextConfirmed[o.id] = {};
-            }
+              }
+            });
+            nextConfirmed[o.id] = orderConf;
           });
           return nextConfirmed;
         });
@@ -152,8 +152,8 @@ export default function PostazioneTablet() {
     setValidationError(prev => ({ ...prev, [orderId]: null }));
   };
 
-  // Conferma del singolo articolo
-  const handleConfirmSingleItem = (orderId, prodIndex) => {
+  // Conferma del singolo articolo con persistenza immediata a DB
+  const handleConfirmSingleItem = async (orderId, prodIndex) => {
     const prods = formData[orderId] || [];
     const p = prods[prodIndex];
     if (!p) return;
@@ -189,6 +189,22 @@ export default function PostazioneTablet() {
       return { ...prev, [orderId]: ordErrors };
     });
 
+    const updatedProd = {
+      ...p,
+      grammatura: p.grammatura,
+      numero_lotto: p.numero_lotto,
+      confermato: true
+    };
+
+    const updatedOrderProds = (formData[orderId] || []).map((item, idx) =>
+      idx === prodIndex ? updatedProd : item
+    );
+
+    setFormData(prev => ({
+      ...prev,
+      [orderId]: updatedOrderProds
+    }));
+
     setConfirmedItems(prev => ({
       ...prev,
       [orderId]: {
@@ -198,15 +214,58 @@ export default function PostazioneTablet() {
     }));
 
     setValidationError(prev => ({ ...prev, [orderId]: null }));
+
+    // Persisti immediatamente a DB
+    try {
+      await fetch(`/api/ordini/${orderId}/prodotti/${prodIndex}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          index: prodIndex,
+          prodotto: updatedProd,
+          prodotti: updatedOrderProds
+        })
+      });
+    } catch (err) {
+      console.error("Errore salvataggio singolo prodotto:", err);
+    }
   };
 
-  // Modifica / Sblocco del singolo articolo
-  const handleUnlockSingleItem = (orderId, prodIndex) => {
+  // Modifica / Sblocco del singolo articolo con persistenza a DB
+  const handleUnlockSingleItem = async (orderId, prodIndex) => {
     setConfirmedItems(prev => {
       const ordConf = { ...(prev[orderId] || {}) };
       delete ordConf[prodIndex];
       return { ...prev, [orderId]: ordConf };
     });
+
+    const currentProds = formData[orderId] || [];
+    const p = currentProds[prodIndex];
+    if (p) {
+      const updatedProd = { ...p, confermato: false };
+      const updatedOrderProds = currentProds.map((item, idx) =>
+        idx === prodIndex ? updatedProd : item
+      );
+
+      setFormData(prev => ({
+        ...prev,
+        [orderId]: updatedOrderProds
+      }));
+
+      try {
+        await fetch(`/api/ordini/${orderId}/prodotti/${prodIndex}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            index: prodIndex,
+            prodotto: updatedProd,
+            prodotti: updatedOrderProds
+          })
+        });
+      } catch (err) {
+        console.error("Errore sblocco singolo prodotto:", err);
+      }
+    }
   };
 
   // Funzione rapida per copiare il lotto del primo articolo su tutti gli altri
