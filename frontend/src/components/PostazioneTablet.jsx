@@ -36,7 +36,8 @@ const isSoleOrder = (ord) => {
 const isFiloniOrder = (ord) => {
   if (ord.is_filoni !== undefined && ord.is_filoni !== null) return Boolean(ord.is_filoni);
   const m = (ord.mittente || '').toLowerCase();
-  if (m.includes('mulnar') || m.includes('franzoli') || m.includes('fronzaroli') || m.includes('vignola') || m.includes('ciccio brown')) return true;
+  const m_clean = m.replace(/\D/g, '');
+  if (m.includes('mulnar') || m.includes('franzoli') || m.includes('fronzaroli') || m.includes('vignola') || m.includes('ciccio brown') || m.includes('ciccio') || m_clean.includes('3881404154') || m_clean.includes('3471461004') || m_clean.includes('0975203278')) return true;
   return (ord.prodotti || []).some(p => {
     const nome = (p.nome_articolo || p.codice_articolo || '').toLowerCase();
     const cod = (p.codice_articolo || '').toLowerCase();

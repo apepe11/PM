@@ -1128,9 +1128,15 @@ def is_cliente_mulnar(mittente: str) -> bool:
     return False
 
 def is_cliente_vignola(mittente: str) -> bool:
-    """Verifica se il mittente corrisponde ad Agriturismo Vignola (o Ciccio Brown)."""
+    """Verifica se il mittente o numero corrisponde ad Agriturismo Vignola (o Ciccio Brown)."""
     m = str(mittente or "").lower()
-    return "vignola" in m or "ciccio brown" in m
+    m_clean = re.sub(r"\D", "", m)
+    if "vignola" in m or "ciccio brown" in m or "ciccio" in m:
+        return True
+    for num in ["3881404154", "881404154"]:
+        if num in m_clean or num in m:
+            return True
+    return False
 
 def is_burrata_articolo(codice: str, nome: str) -> bool:
     """Verifica se l'articolo è una burrata di qualsiasi tipologia (classica, tartufo, pistacchio, ecc.)."""
@@ -1202,7 +1208,7 @@ async def get_produzione_aggregata(data_target: Optional[str] = None):
     for o in ordini:
         if o.get("is_cancelled") or o.get("stato_ordine") == "ANNULLATO":
             continue
-        if is_cliente_mulnar(o.get("mittente", "")):
+        if is_cliente_mulnar(o.get("mittente", "")) or is_cliente_vignola(o.get("mittente", "")):
             continue
         for p in o.get("prodotti", []):
             cod = str(p.get("codice_articolo", "GENERICO")).strip()

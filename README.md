@@ -47,6 +47,7 @@ Include un'architettura a **singolo eseguibile chiuso (PyInstaller)** con **Sist
 - **Gestione Distinta Filoni di Mozzarella (`FILMZPE`)**: I prodotti per pizza (filoni, panetti, julienne, tagju) vengono automaticamente esclusi dalla tabella generale del casaro e indirizzati in questa sezione dedicata.
 - **Instradamento Automatico Clienti Pizzeria**:
   - **Pizzeria Mulnar** (numeri `347 146 1004` e `0975203278`): catalogati automaticamente nei filoni pizzeria.
+  - **Agriturismo Vignola / Ciccio Brown** (`388 140 4154`): catalogati automaticamente nei filoni pizzeria.
   - **Giovanni Franzoli** (`+115131027611727`): gestione ordini filoni.
 - **Stampa PDF Scheda Filoni**: Foglio di taglio e preparazione distinto cliente per cliente.
 
