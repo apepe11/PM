@@ -638,13 +638,22 @@ def scarica_media_evolution(message_obj: dict) -> Optional[dict]:
 
     return None
 
-def _is_titolare_andrea(mittente: str) -> bool:
+def _is_titolare(mittente: str) -> bool:
     m = (mittente or "").lower()
-    return "3334695153" in m or "224257489502407" in m or "andrea aliandro" in m
+    return (
+        "3334695153" in m or 
+        "224257489502407" in m or 
+        "andrea aliandro" in m or
+        "3406754366" in m or
+        "giuseppe campenella" in m or
+        "giuseppe campanella" in m
+    )
+
+_is_titolare_andrea = _is_titolare
 
 
 async def _accoda_messaggio_utente(mittente: str, testo: str, is_vocal: bool, msg_raw: dict, data_ricezione_custom: str) -> None:
-    if _is_titolare_andrea(mittente):
+    if _is_titolare(mittente):
         await _flush_buffer_utente(mittente, motivo="messaggio del Titolare: bypass buffer, ordine già completo")
         asyncio.create_task(_processa_ordine_ia(mittente, testo, is_vocal, msg_raw, data_ricezione_custom))
         return
@@ -721,8 +730,8 @@ async def _processa_ordine_ia(mittente: str, testo: str, is_vocal: bool, msg_raw
 
     dt_msg = datetime.strptime(data_ricezione_custom, '%Y-%m-%d %H:%M:%S')
 
-    is_andrea_mittente = _is_titolare_andrea(mittente)
-    storico_di_oggi = "" if is_andrea_mittente else await get_storico_oggi(mittente)
+    is_titolare_mittente = _is_titolare(mittente)
+    storico_di_oggi = "" if is_titolare_mittente else await get_storico_oggi(mittente)
 
     risultato_ia = await ai_parser.parse_message(
         testo,

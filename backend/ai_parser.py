@@ -86,13 +86,21 @@ def calcola_data_consegna_target(ora_attuale: Optional[datetime] = None, client_
 
 def estrai_cliente_reale(text_to_parse: str, client_name: str, message_timestamp: Optional[datetime]) -> str:
     """
-    Capisce se l'ordine è diretto dal cliente o se è stato inoltrato dal Titolare (Andrea).
+    Capisce se l'ordine è diretto dal cliente o se è stato inoltrato da un Titolare (Andrea o Giuseppe).
     Se è inoltrato, estrae il nome reale del cliente dal testo.
     """
-    is_andrea = "3334695153" in client_name or "224257489502407" in client_name or "andrea aliandro" in client_name.lower()
+    # Controlla se il mittente è Andrea o Giuseppe
+    is_titolare = (
+        "3334695153" in client_name or 
+        "224257489502407" in client_name or 
+        "andrea aliandro" in client_name.lower() or
+        "3406754366" in client_name or
+        "giuseppe campenella" in client_name.lower() or
+        "giuseppe campanella" in client_name.lower()
+    )
     cliente_finale = client_name
     
-    if is_andrea:
+    if is_titolare:
         estratto = None
         testo_pulito = text_to_parse.replace("🎙️ [VOCALE TRASCRITTO]:", "").strip()
         
@@ -109,7 +117,7 @@ def estrai_cliente_reale(text_to_parse: str, client_name: str, message_timestamp
                 if match_vocale:
                     estratto = match_vocale.group(1).strip()
 
-        if estratto and estratto.lower() not in ["null", "none", "andrea", "andrea aliandro", "sconosciuto"]:
+        if estratto and estratto.lower() not in ["null", "none", "andrea", "andrea aliandro", "giuseppe", "giuseppe campanella", "giuseppe campenella", "sconosciuto"]:
             cliente_finale = estratto 
         else:
             dt_sicura = message_timestamp or datetime.now()
@@ -237,11 +245,18 @@ class AIParser:
         regole_cliente = self.get_specific_client_rules(client_name)
         data_target_str, descrizione_slot = calcola_data_consegna_target(message_timestamp, client_name)
 
-        is_andrea = "3334695153" in client_name or "224257489502407" in client_name or "andrea aliandro" in client_name.lower()
-        andrea_rule = (
+        is_titolare = (
+            "3334695153" in client_name or 
+            "224257489502407" in client_name or 
+            "andrea aliandro" in client_name.lower() or
+            "3406754366" in client_name or
+            "giuseppe campenella" in client_name.lower() or
+            "giuseppe campanella" in client_name.lower()
+        )
+        titolare_rule = (
             "ORDINI INOLTRATI: Formato 'NomeCliente, Data, Ordine'. "
             "ESTRAI il NomeCliente (parola prima della virgola) in 'cliente_reale'. Altrimenti scrivi 'SCONOSCIUTO'."
-        ) if is_andrea else "Il messaggio arriva direttamente dal cliente reale."
+        ) if is_titolare else "Il messaggio arriva direttamente dal cliente reale."
 
         giorni_it = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
         oggi_nome = giorni_it[message_timestamp.weekday()]
@@ -261,7 +276,7 @@ class AIParser:
         "domani"={cal_dopo[0].split('=')[1]}, "dopodomani"={cal_dopo[1].split('=')[1]}.
         Se non specifica NESSUNA data o giorno, usa il default: {descrizione_slot}
         
-        REGOLE: {andrea_rule} "is_cancelled":true se annullato.
+        REGOLE: {titolare_rule} "is_cancelled":true se annullato.
         
         INTEGRAZIONE STORICO (FONDAMENTALE):
         Se ti viene passato uno "STORICO OGGI", NON ELIMINARE I PRODOTTI GIÀ PRESENTI! 
